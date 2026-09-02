@@ -1,365 +1,308 @@
-
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const WebSocket = require("ws");
 
 const HOST = "0.0.0.0";
 const PORT = Number(process.env.PORT) || 5500;
 
+const TOTAL_ROUNDS = 3;
+const MAX_PLAYERS = 16;
+const NENNEN_TIME = 30;
+
 const rooms = new Map();
 const clients = new Set();
 
-let nextPlayerId = 1;
+const playersById = new Map();
+const playersByIdentity = new Map();
 
-const NENNEN_ROUNDS = [
+/* =========================================================
+   FRAGEN
+   ========================================================= */
+
+const quizQuestions = [
     {
-        title: "Alle Minecraft-Verzauberungen",
-        description:
-            "Nennt abwechselnd eine gültige Minecraft-Verzauberung. Keine Wiederholungen.",
+        question: "Wie viele Herzen hat ein Spieler in Minecraft?",
         answers: [
-            "Aqua Affinity",
-            "Bane of Arthropods",
-            "Blast Protection",
-            "Breach",
-            "Channeling",
-            "Curse of Binding",
-            "Curse of Vanishing",
-            "Depth Strider",
-            "Efficiency",
-            "Feather Falling",
-            "Fire Aspect",
-            "Fire Protection",
-            "Flame",
-            "Fortune",
-            "Frost Walker",
-            "Impaling",
-            "Infinity",
-            "Knockback",
-            "Looting",
-            "Loyalty",
-            "Luck of the Sea",
-            "Lure",
-            "Lunch",
-            "Mending",
-            "Multishot",
-            "Piercing",
-            "Power",
-            "Projectile Protection",
-            "Protection",
-            "Punch",
-            "Quick Charge",
-            "Respiration",
-            "Riptide",
-            "Sharpness",
-            "Silk Touch",
-            "Smite",
-            "Soul Speed",
-            "Sweeping Edge",
-            "Swift Sneak",
-            "Thorns",
-            "Unbreaking",
-            "Wind Burst"
-        ]
+            "5",
+            "10",
+            "20",
+            "40"
+        ],
+        correct: 1
     },
-
     {
-        title: "Alle essbaren Items",
-        description:
-            "Nennt abwechselnd ein essbares Minecraft-Item. Keine Wiederholungen.",
+        question: "Welches Erz ist am seltensten in der normalen Oberwelt?",
         answers: [
-            "Apfel",
-            "Goldener Apfel",
-            "Verzauberter goldener Apfel",
-            "Brot",
-            "Karotte",
-            "Goldene Karotte",
-            "Kartoffel",
-            "Ofenkartoffel",
-            "Giftige Kartoffel",
-            "Rote Bete",
-            "Rote-Bete-Suppe",
-            "Pilzsuppe",
-            "Kaninchenragout",
-            "Steak",
-            "Gebratenes Schweinekotlett",
-            "Rohes Schweinekotlett",
-            "Gebratenes Hühnchen",
-            "Rohes Hühnchen",
-            "Gebratener Kabeljau",
-            "Roher Kabeljau",
-            "Gebratener Lachs",
-            "Roher Lachs",
-            "Gebratenes Hammelfleisch",
-            "Rohes Hammelfleisch",
-            "Gebratenes Kaninchen",
-            "Rohes Kaninchen",
-            "Getrockneter Seetang",
-            "Melonenscheibe",
-            "Kürbiskuchen",
-            "Keks",
-            "Kuchen",
-            "Süßbeeren",
-            "Leuchtbeeren",
-            "Chorusfrucht",
-            "Honigflasche",
-            "Kugelfisch",
-            "Verrottetes Fleisch",
-            "Spinnenauge"
-
-        ]
-    },
-
-    {
-        title: "Mobs, die nicht immer angreifen",
-        description:
-            "Nennt abwechselnd einen Mob, der den Spieler nicht immer automatisch angreift. Keine Wiederholungen.",
-        answers: [
-            "Axolotl",
-            "Biene",
-            "Eisbär",
-            "Fuchs",
-            "Ghast",
-            "Huhn",
-            "Kuh",
-            "Katze",
-            "Kaninchen",
-            "Lama",
-            "Mooshroom",
-            "Nautilus",
-            "Ozelot",
-            "Panda",
-            "Papagei",
-            "Pferd",
-            "Schaf",
-            "Schwein",
-            "Schneegolem",
-            "Tintenfisch",
-            "Wasserschwein",
-            "Wolf",
-            "Ziege",
-            "Delfin",
-            "Schildkröte",
-            "Armadillo",
-            "Gürteltier"
-        ]
-    }
-];
-
-const QUIZ_QUESTIONS = [
-    {
-        question: "Welches Erz ist am seltensten?",
-        answers: ["Kohle", "Eisen", "Diamant", "Kupfer"],
+            "Kohle",
+            "Eisen",
+            "Diamant",
+            "Gold"
+        ],
         correct: 2
     },
     {
-        question: "Wie viele Herzen hat ein normaler Spieler?",
-        answers: ["5", "10", "20", "40"],
+        question: "Wie heißt die Dimension mit den Endermen?",
+        answers: [
+            "Nether",
+            "End",
+            "Aether",
+            "Deep Dark"
+        ],
+        correct: 1
+    },
+    {
+        question: "Wie viele Obsidianblöcke benötigt ein normales Netherportal mindestens?",
+        answers: [
+            "8",
+            "10",
+            "12",
+            "14"
+        ],
         correct: 1
     },
     {
         question: "Welcher Mob explodiert?",
-        answers: ["Zombie", "Creeper", "Skeleton", "Spider"],
+        answers: [
+            "Zombie",
+            "Skelett",
+            "Creeper",
+            "Spinne"
+        ],
+        correct: 2
+    },
+    {
+        question: "Welches Item benötigt man, um ein Endportal zu aktivieren?",
+        answers: [
+            "Enderperle",
+            "Auge des Enders",
+            "Netherstern",
+            "Endstein"
+        ],
         correct: 1
     },
     {
-        question: "Wie heißt die Dimension mit dem Enderdrachen?",
-        answers: ["Nether", "End", "Aether", "Deep Dark"],
+        question: "Wie viele Diamanten benötigt man für eine vollständige Diamantrüstung?",
+        answers: [
+            "18",
+            "24",
+            "27",
+            "32"
+        ],
         correct: 1
-    },
-    {
-        question: "Welches Item braucht man für ein Netherportal?",
-        answers: ["Obsidian", "Diamant", "Endstein", "Bedrock"],
-        correct: 0
     },
     {
         question: "Was droppt ein Creeper normalerweise?",
-        answers: ["Knochen", "Faden", "Schießpulver", "Leder"],
-        correct: 2
-    },
-    {
-        question: "Welche Spitzhacke kann Diamanterz abbauen?",
         answers: [
-            "Holzspitzhacke",
-            "Steinspitzhacke",
-            "Eisenspitzhacke",
-            "Goldspitzhacke"
-        ],
-        correct: 2
-    },
-    {
-        question: "Wie viele Blöcke hoch ist ein normaler Spieler ungefähr?",
-        answers: [
-            "1 Block",
-            "1,8 Blöcke",
-            "3 Blöcke",
-            "4 Blöcke"
+            "Pfeile",
+            "Schießpulver",
+            "Knochen",
+            "Fäden"
         ],
         correct: 1
     },
     {
-        question: "Welcher Mob kann durch Wände teleportieren?",
+        question: "Welcher Block kann einen Leuchtturm aktivieren?",
         answers: [
-            "Enderman",
-            "Zombie",
-            "Kuh",
-            "Hexe"
-        ],
-        correct: 0
-    },
-    {
-        question: "Was benötigt man zum Herstellen eines Bettes?",
-        answers: [
-            "3 Wolle + 3 Bretter",
-            "6 Wolle",
-            "3 Leder + 3 Bretter",
-            "3 Wolle + 3 Eisen"
-        ],
-        correct: 0
-    },
-    {
-        question: "Welche Pflanze wächst auf Netherboden?",
-        answers: [
-            "Weizen",
-            "Netherwarze",
-            "Karotte",
-            "Zuckerrohr"
+            "Stein",
+            "Eisenblock",
+            "Erde",
+            "Sandstein"
         ],
         correct: 1
     },
     {
-        question: "Welcher Mob kann Tridents werfen?",
+        question: "Wie viele Bücherregale braucht ein Verzauberungstisch für maximale Verzauberungen?",
         answers: [
-            "Drowned",
-            "Zombie",
-            "Pillager",
-            "Husk"
+            "10",
+            "12",
+            "15",
+            "18"
         ],
-        correct: 0
+        correct: 2
     }
 ];
 
-const ESTIMATE_QUESTIONS = [
+const estimateQuestions = [
     {
-        question: "Wie viele Blöcke hoch ist ein Enderman?",
-        answer: 3
+        question: "Wie hoch ist ein normaler Spieler-Sprung in Blöcken?",
+        answer: 1.25
     },
     {
-        question: "Wie viele verschiedene Farben kann ein Schaf natürlich haben?",
-        answer: 4
+        question: "Wie viele Blöcke kann Wasser sich in der Oberwelt horizontal ausbreiten?",
+        answer: 7
+    },
+    {
+        question: "Wie viele Herzen hat ein normaler Creeper?",
+        answer: 10
     },
     {
         question: "Wie viele Slots hat eine normale große Truhe?",
         answer: 54
     },
     {
-        question:
-            "Wie viele Bücherregale braucht man maximal für einen Level-30-Verzauberungstisch?",
-        answer: 15
-    },
-    {
-        question:
-            "Wie viele Eisenbarren benötigt man für eine komplette Eisenrüstung?",
-        answer: 24
-    },
-    {
-        question:
-            "Wie viele Obsidianblöcke benötigt ein minimales Netherportal?",
+        question: "Wie viele Obsidianblöcke hat ein Netherportal mindestens?",
         answer: 10
     },
     {
-        question: "Wie viele Herzen hat ein Enderdrache?",
-        answer: 100
+        question: "Wie viele Enderperlen benötigt man maximal für ein Eye of Ender?",
+        answer: 1
     },
     {
-        question:
-            "Wie viele Pfeile kann ein Skelett maximal fallen lassen, wenn Looting nicht zählt?",
-        answer: 2
+        question: "Wie viele Erfahrungspunkte bekommt man ungefähr für das Töten eines normalen Zombies?",
+        answer: 5
     },
     {
-        question:
-            "Wie viele Holzplanken braucht man für eine Werkbank?",
-        answer: 4
+        question: "Wie viele Blöcke ist ein Stack maximal?",
+        answer: 64
     },
     {
-        question:
-            "Wie viele Augen benötigt man theoretisch maximal für ein Endportal?",
-        answer: 12
+        question: "Wie viele Minuten dauert ein kompletter Minecraft-Tag?",
+        answer: 20
+    },
+    {
+        question: "Wie viele Slots besitzt ein normales Inventar ohne Hotbar?",
+        answer: 27
     }
 ];
 
-function shuffle(array) {
-    const result = [...array];
+const nennenWords = [
+    "Baum",
+    "Stein",
+    "Eisen",
+    "Diamant",
+    "Zombie",
+    "Creeper",
+    "Dorf",
+    "Nether",
+    "Enderdrache",
+    "Schaf",
+    "Kuh",
+    "Schwein",
+    "Bogen",
+    "Schwert",
+    "Spitzhacke",
+    "Fackel",
+    "Ofen",
+    "Truhe",
+    "Crafting Table",
+    "Redstone",
+    "Gold",
+    "Obsidian",
+    "Sand",
+    "Glas",
+    "Wasser"
+];
 
-    for (let i = result.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+/* =========================================================
+   HILFSFUNKTIONEN
+   ========================================================= */
 
-        [result[i], result[j]] = [
-            result[j],
-            result[i]
-        ];
-    }
-
-    return result;
+function randomId() {
+    return crypto.randomUUID();
 }
 
-function makeRoomCode() {
+function randomRoomCode() {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-    let code;
+    let code = "";
 
     do {
         code = "";
 
         for (let i = 0; i < 5; i++) {
-            code += chars[
-                Math.floor(Math.random() * chars.length)
-            ];
+            code += chars[Math.floor(Math.random() * chars.length)];
         }
     } while (rooms.has(code));
 
     return code;
 }
 
-function makePlayerId() {
-    return `player-${nextPlayerId++}`;
+function shuffle(array) {
+    const arr = [...array];
+
+    for (let i = arr.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+
+        [arr[i], arr[j]] = [arr[j], arr[i]];
+    }
+
+    return arr;
 }
 
-function cleanName(name) {
-    return String(name || "")
+function clamp(value, min, max) {
+    return Math.max(min, Math.min(max, value));
+}
+
+function safeName(name) {
+    return String(name || "Spieler")
         .trim()
-        .replace(/\s+/g, " ")
-        .slice(0, 20);
+        .replace(/[<>]/g, "")
+        .slice(0, 20) || "Spieler";
 }
 
-function normalizeAnswer(value) {
-    return String(value || "")
-        .trim()
-        .toLowerCase()
-        .replace(/ß/g, "ss")
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9\s-]/gi, "")
-        .replace(/\s+/g, " ");
+/*
+    Regel:
+    - Normale Spieler sind aktiv.
+    - Der Besitzer ist nur aktiv, wenn playing === true.
+*/
+function isPlayerActive(player) {
+    if (!player) return false;
+
+    if (!player.owner) {
+        return true;
+    }
+
+    return player.playing === true;
 }
 
-function findPlayerByIdentity(room, identityId) {
-    return [...room.players.values()].find(
-        player => player.identityId === identityId
+function getActivePlayers(room) {
+    return room.players.filter(player => isPlayerActive(player));
+}
+
+function getConnectedActivePlayers(room) {
+    return getActivePlayers(room).filter(
+        player => player.connections.size > 0
     );
 }
 
-function send(socket, message) {
-    if (
-        !socket ||
-        socket.readyState !== WebSocket.OPEN
-    ) {
-        return;
-    }
+function getPlayerBySocket(socket) {
+    return socket.playerId
+        ? playersById.get(socket.playerId) || null
+        : null;
+}
+
+function getRoomOfPlayer(player) {
+    if (!player?.roomCode) return null;
+
+    return rooms.get(player.roomCode) || null;
+}
+
+/* =========================================================
+   BROADCAST
+   ========================================================= */
+
+function send(socket, payload) {
+    if (!socket) return;
+
+    if (socket.readyState !== WebSocket.OPEN) return;
 
     try {
-        socket.send(JSON.stringify(message));
-    } catch (_) {}
+        socket.send(JSON.stringify(payload));
+    } catch (error) {
+        console.error("Sendefehler:", error);
+    }
+}
+
+function broadcast(room, payload) {
+    if (!room) return;
+
+    for (const player of room.players) {
+        for (const socket of player.connections) {
+            send(socket, payload);
+        }
+    }
 }
 
 function sendError(socket, message) {
@@ -369,1547 +312,1444 @@ function sendError(socket, message) {
     });
 }
 
-function sendErrorToRoom(room, message) {
-    for (const player of room.players.values()) {
-        for (const socket of player.connections) {
-            sendError(socket, message);
-        }
-    }
-}
+/* =========================================================
+   ROOM STATE
+   ========================================================= */
 
-function getPlayerName(room, playerId) {
-    return room.players.get(playerId)?.name || "Spieler";
-}
-
-function publicRoom(room, viewerPlayerId) {
-    const players = [
-        ...room.players.values()
-    ].map(player => ({
+function serializePlayer(player) {
+    return {
         id: player.id,
         name: player.name,
         owner: player.owner,
+        playing: player.owner ? player.playing === true : true,
         connected: player.connections.size > 0,
-        score: player.score,
-        roundPoints: player.roundPoints
-    }));
+        score: player.score || 0
+    };
+}
 
-    const viewer = room.players.get(viewerPlayerId);
-
+function buildRoomState(room) {
     return {
-        code: room.code,
-        ownerId: room.ownerId,
-        isOwner: !!viewer && viewer.id === room.ownerId,
-        myPlayerId: viewerPlayerId || null,
-        players,
+        type: "state",
         phase: room.phase,
+        roomCode: room.code,
+        ownerId: room.ownerId,
+        category: room.category,
         round: room.round,
         totalRounds: room.totalRounds,
+        players: room.players.map(serializePlayer),
 
-        nennen: room.nennen
-            ? {
-                  round: room.nennen.round,
-                  totalRounds: room.nennen.totalRounds,
-                  title: room.nennen.title,
-                  description: room.nennen.description,
-                  currentPlayerId:
-                      room.nennen.currentPlayerId,
-                  usedAnswers: [
-                      ...room.nennen.usedAnswers
-                  ],
-                  turnEndsAt: room.nennen.turnEndsAt
-              }
-            : null,
+        game: {
+            word: room.game?.word || null,
+            currentPlayerId: room.game?.currentPlayerId || null,
+            currentPlayerName: room.game?.currentPlayerName || null,
+            timeLeft: room.game?.timeLeft ?? null,
 
-        quiz: room.quiz
-            ? {
-                  round: room.quiz.round,
-                  totalRounds: room.quiz.totalRounds,
-                  number: room.quiz.number,
-                  totalQuestions: room.quiz.totalQuestions,
-                  question: room.quiz.question,
-                  answers: room.quiz.answers,
-                  currentPlayerId:
-                      room.quiz.currentPlayerId,
-                  answered: room.quiz.answered
-              }
-            : null,
+            question: room.game?.question || null,
+            answers: room.game?.answers || null,
+            questionNumber: room.game?.questionNumber || null,
+            totalQuestions: room.game?.totalQuestions || null,
 
-        estimate: room.estimate
-            ? {
-                  round: room.estimate.round,
-                  totalRounds: room.estimate.totalRounds,
-                  number: room.estimate.number,
-                  totalQuestions:
-                      room.estimate.totalQuestions,
-                  question: room.estimate.question,
-                  currentPlayerId:
-                      room.estimate.currentPlayerId,
-                  answered: room.estimate.answered
-              }
-            : null,
+            estimateQuestion:
+                room.game?.estimateQuestion || null,
 
-        results: room.results
-            ? {
-                  category: room.results.category,
-                  message: room.results.message,
-                  players: room.results.players
-              }
-            : null
+            submitted:
+                room.game?.submitted || {}
+        },
+
+        results: room.results || [],
+        winner: room.winner || null
     };
 }
 
-function broadcastRoom(room) {
-    for (const player of room.players.values()) {
-        const data = {
-            type: "state",
-            state: publicRoom(room, player.id)
-        };
-
-        for (const socket of player.connections) {
-            send(socket, data);
-        }
-    }
+function broadcastState(room) {
+    broadcast(room, buildRoomState(room));
 }
 
-function broadcastOnlineCount() {
-    const count = clients.size;
-
-    for (const socket of clients) {
-        send(socket, {
-            type: "onlineCount",
-            count
-        });
-    }
-}
-
-function getActivePlayers(room) {
-    return [
-        ...room.players.values()
-    ].filter(player => !player.owner);
-}
-
-function getConnectedActivePlayers(room) {
-    return getActivePlayers(room).filter(
-        player => player.connections.size > 0
-    );
-}
-
-function nextActivePlayer(room, currentPlayerId) {
-    const players = getConnectedActivePlayers(room);
-
-    if (!players.length) {
-        return null;
-    }
-
-    const index = players.findIndex(
-        player => player.id === currentPlayerId
-    );
-
-    if (index === -1) {
-        return players[0];
-    }
-
-    return players[
-        (index + 1) % players.length
-    ];
-}
-
-function clearNennenTimer(room) {
-    if (room.nennenTimer) {
-        clearTimeout(room.nennenTimer);
-        room.nennenTimer = null;
-    }
-}
-
-function startNennen(room) {
-    const players = getConnectedActivePlayers(room);
-
-    if (players.length < 2) {
-        sendErrorToRoom(
-            room,
-            "Mindestens 2 verbundene Mitspieler werden benötigt."
-        );
-
-        return false;
-    }
-
-    clearNennenTimer(room);
-
-    const roundIndex =
-        (room.round - 1) % NENNEN_ROUNDS.length;
-
-    const topic = NENNEN_ROUNDS[roundIndex];
-
-    room.phase = "nennen";
-
-    room.nennen = {
-        round: room.round,
-        totalRounds: room.totalRounds,
-        title: topic.title,
-        description: topic.description,
-        answers: topic.answers,
-
-        normalizedAnswers: new Map(
-            topic.answers.map(answer => [
-                normalizeAnswer(answer),
-                answer
-            ])
-        ),
-
-        usedAnswers: new Set(),
-
-        currentPlayerId: players[0].id,
-
-        turnEndsAt: Date.now() + 30000
-    };
-
-    room.results = null;
-
-    broadcastRoom(room);
-    scheduleNennenTimeout(room);
-
-    return true;
-}
-
-function scheduleNennenTimeout(room) {
-    clearNennenTimer(room);
-
-    if (!room.nennen) {
-        return;
-    }
-
-    const roomCode = room.code;
-    const expectedPlayer =
-        room.nennen.currentPlayerId;
-
-    const expectedEnd =
-        room.nennen.turnEndsAt;
-
-    room.nennenTimer = setTimeout(() => {
-        const currentRoom = rooms.get(roomCode);
-
-        if (
-            !currentRoom ||
-            currentRoom.phase !== "nennen" ||
-            !currentRoom.nennen
-        ) {
-            return;
-        }
-
-        if (
-            currentRoom.nennen.currentPlayerId !==
-                expectedPlayer ||
-            currentRoom.nennen.turnEndsAt !==
-                expectedEnd
-        ) {
-            return;
-        }
-
-        endNennenRound(
-            currentRoom,
-            `${getPlayerName(
-                currentRoom,
-                expectedPlayer
-            )} hat die Zeit überschritten.`
-        );
-    }, 30100);
-}
-
-function endNennenRound(room, message) {
-    if (room.phase !== "nennen") {
-        return;
-    }
-
-    clearNennenTimer(room);
-
-    room.results = {
-        category: "nennen",
-        message,
-
-        players: getActivePlayers(room)
-            .map(player => ({
-                id: player.id,
-                name: player.name,
-                points: player.roundPoints,
-                score: player.score
-            }))
-            .sort((a, b) => b.points - a.points)
-    };
-
-    room.phase = "results";
-
-    broadcastRoom(room);
-}
-
-function startQuiz(room) {
-    const players = getConnectedActivePlayers(room);
-
-    if (players.length < 2) {
-        sendErrorToRoom(
-            room,
-            "Mindestens 2 verbundene Mitspieler werden benötigt."
-        );
-
-        return false;
-    }
-
-    const questions = shuffle(QUIZ_QUESTIONS).slice(
-        0,
-        Math.min(5, QUIZ_QUESTIONS.length)
-    );
-
-    room.quizQuestions = questions;
-
-    room.quiz = {
-        round: room.round,
-        totalRounds: room.totalRounds,
-        number: 1,
-        totalQuestions: questions.length,
-        question: questions[0].question,
-        answers: questions[0].answers,
-        correct: questions[0].correct,
-        currentPlayerId: players[0].id,
-        answered: false
-    };
-
-    room.phase = "quiz";
-    room.results = null;
-
-    broadcastRoom(room);
-
-    return true;
-}
-
-function nextQuizQuestion(room) {
-    if (!room.quiz) {
-        return;
-    }
-
-    const players = getConnectedActivePlayers(room);
-
-    if (!players.length) {
-        finishQuiz(room);
-        return;
-    }
-
-    const number = room.quiz.number + 1;
-
-    if (number > room.quizQuestions.length) {
-        finishQuiz(room);
-        return;
-    }
-
-    const question =
-        room.quizQuestions[number - 1];
-
-    room.quiz.number = number;
-    room.quiz.question = question.question;
-    room.quiz.answers = question.answers;
-    room.quiz.correct = question.correct;
-
-    room.quiz.currentPlayerId =
-        players[(number - 1) % players.length].id;
-
-    room.quiz.answered = false;
-
-    broadcastRoom(room);
-}
-
-function finishQuiz(room) {
-    room.results = {
-        category: "quiz",
-        message: "Die Quizrunde ist beendet.",
-
-        players: getActivePlayers(room)
-            .map(player => ({
-                id: player.id,
-                name: player.name,
-                points: player.roundPoints,
-                score: player.score
-            }))
-            .sort((a, b) => b.points - a.points)
-    };
-
-    room.phase = "results";
-
-    broadcastRoom(room);
-}
-
-function startEstimate(room) {
-    const players = getConnectedActivePlayers(room);
-
-    if (players.length < 2) {
-        sendErrorToRoom(
-            room,
-            "Mindestens 2 verbundene Mitspieler werden benötigt."
-        );
-
-        return false;
-    }
-
-    const questions =
-        shuffle(ESTIMATE_QUESTIONS).slice(
-            0,
-            Math.min(5, ESTIMATE_QUESTIONS.length)
-        );
-
-    room.estimateQuestions = questions;
-
-    room.estimate = {
-        round: room.round,
-        totalRounds: room.totalRounds,
-        number: 1,
-        totalQuestions: questions.length,
-        question: questions[0].question,
-        answer: questions[0].answer,
-        currentPlayerId: players[0].id,
-        answered: false
-    };
-
-    room.phase = "estimate";
-    room.results = null;
-
-    broadcastRoom(room);
-
-    return true;
-}
-
-function nextEstimateQuestion(room) {
-    if (!room.estimate) {
-        return;
-    }
-
-    const players = getConnectedActivePlayers(room);
-
-    if (!players.length) {
-        finishEstimate(room);
-        return;
-    }
-
-    const number = room.estimate.number + 1;
-
-    if (number > room.estimateQuestions.length) {
-        finishEstimate(room);
-        return;
-    }
-
-    const question =
-        room.estimateQuestions[number - 1];
-
-    room.estimate.number = number;
-    room.estimate.question = question.question;
-    room.estimate.answer = question.answer;
-
-    room.estimate.currentPlayerId =
-        players[(number - 1) % players.length].id;
-
-    room.estimate.answered = false;
-
-    broadcastRoom(room);
-}
-
-function finishEstimate(room) {
-    room.results = {
-        category: "estimate",
-        message: "Die Schätzrunde ist beendet.",
-
-        players: getActivePlayers(room)
-            .map(player => ({
-                id: player.id,
-                name: player.name,
-                points: player.roundPoints,
-                score: player.score
-            }))
-            .sort((a, b) => b.points - a.points)
-    };
-
-    room.phase = "results";
-
-    broadcastRoom(room);
-}
-
-function startCategory(room, category) {
-    if (category === "nennen") {
-        return startNennen(room);
-    }
-
-    if (category === "quiz") {
-        return startQuiz(room);
-    }
-
-    if (category === "estimate") {
-        return startEstimate(room);
-    }
-
-    return false;
-}
-
-function createRoom(player, socket) {
-    const code = makeRoomCode();
-
+/* =========================================================
+   ROOM LIFECYCLE
+   ========================================================= */
+
+function createRoom(ownerPlayer) {
     const room = {
-        code,
+        code: randomRoomCode(),
 
-        ownerId: player.id,
+        ownerId: ownerPlayer.id,
 
-        players: new Map(),
+        players: [],
 
         phase: "lobby",
 
-        round: 1,
+        category: null,
 
-        totalRounds: 3,
+        round: 0,
 
-        nennen: null,
-        nennenTimer: null,
+        totalRounds: TOTAL_ROUNDS,
 
-        quiz: null,
-        quizQuestions: [],
+        game: null,
 
-        estimate: null,
-        estimateQuestions: [],
+        results: [],
 
-        results: null
+        winner: null,
+
+        timer: null,
+
+        turnTimer: null
     };
 
-    player.owner = true;
-    player.score = 0;
-    player.roundPoints = 0;
-    player.roomCode = code;
+    ownerPlayer.owner = true;
+    ownerPlayer.playing = true;
+    ownerPlayer.roomCode = room.code;
+    ownerPlayer.score = 0;
 
-    room.players.set(player.id, player);
-    rooms.set(code, room);
+    room.players.push(ownerPlayer);
 
-    send(socket, {
-        type: "roomCreated",
-        code
-    });
+    rooms.set(room.code, room);
 
-    broadcastRoom(room);
+    return room;
 }
 
-function joinRoom(player, socket, code) {
-    const room = rooms.get(code);
+function removePlayerFromRoom(player, room) {
+    if (!player || !room) return;
+
+    const index = room.players.findIndex(
+        p => p.id === player.id
+    );
+
+    if (index !== -1) {
+        room.players.splice(index, 1);
+    }
+
+    player.roomCode = null;
+
+    if (player.owner) {
+        closeRoom(room);
+    }
+}
+
+function closeRoom(room) {
+    if (!room) return;
+
+    clearRoomTimers(room);
+
+    for (const player of room.players) {
+        player.roomCode = null;
+
+        for (const socket of player.connections) {
+            send(socket, {
+                type: "room_closed",
+                message: "Der Raum wurde geschlossen."
+            });
+        }
+    }
+
+    rooms.delete(room.code);
+}
+
+function clearRoomTimers(room) {
+    if (!room) return;
+
+    if (room.timer) {
+        clearInterval(room.timer);
+        room.timer = null;
+    }
+
+    if (room.turnTimer) {
+        clearTimeout(room.turnTimer);
+        room.turnTimer = null;
+    }
+}
+
+/* =========================================================
+   SPIELSTART
+   ========================================================= */
+
+function startGame(room, category) {
+    clearRoomTimers(room);
+
+    const activePlayers = getActivePlayers(room);
+
+    /*
+        WICHTIG:
+        Es müssen IMMER mindestens 2 aktive Spieler sein.
+    */
+    if (activePlayers.length < 2) {
+        return {
+            ok: false,
+            error: "Mindestens 2 aktive Spieler werden benötigt."
+        };
+    }
+
+    room.category = category;
+    room.round = 1;
+    room.results = [];
+    room.winner = null;
+
+    for (const player of room.players) {
+        player.score = 0;
+    }
+
+    if (category === "nennen") {
+        prepareNennenRound(room);
+    } else if (category === "quiz") {
+        prepareQuizRound(room);
+    } else if (category === "estimate") {
+        prepareEstimateRound(room);
+    } else {
+        return {
+            ok: false,
+            error: "Unbekannte Kategorie."
+        };
+    }
+
+    return {
+        ok: true
+    };
+}
+
+/* =========================================================
+   NENNEN
+   ========================================================= */
+
+function prepareNennenRound(room) {
+    clearRoomTimers(room);
+
+    room.phase = "nennen";
+
+    const activePlayers = getConnectedActivePlayers(room);
+
+    if (activePlayers.length < 2) {
+        finishCurrentRound(room);
+        return;
+    }
+
+    const shuffledPlayers = shuffle(activePlayers);
+
+    room.game = {
+        word:
+            nennenWords[
+                Math.floor(Math.random() * nennenWords.length)
+            ],
+
+        currentPlayerId: shuffledPlayers[0].id,
+
+        currentPlayerName: shuffledPlayers[0].name,
+
+        timeLeft: NENNEN_TIME,
+
+        submitted: {},
+
+        turnIndex: 0
+    };
+
+    startNennenTimer(room);
+
+    broadcastState(room);
+}
+
+function startNennenTimer(room) {
+    clearInterval(room.timer);
+
+    room.timer = setInterval(() => {
+        if (!room.game) return;
+
+        room.game.timeLeft--;
+
+        broadcastState(room);
+
+        if (room.game.timeLeft <= 0) {
+            clearInterval(room.timer);
+            room.timer = null;
+
+            handleNennenTimeout(room);
+        }
+    }, 1000);
+}
+
+function handleNennenTimeout(room) {
+    const activePlayers = getConnectedActivePlayers(room);
+
+    if (activePlayers.length < 2) {
+        finishCurrentRound(room);
+        return;
+    }
+
+    /*
+        Bei Timeout verliert der aktuelle Spieler
+        die Runde.
+    */
+    const currentPlayer = room.players.find(
+        player =>
+            player.id === room.game?.currentPlayerId
+    );
+
+    if (currentPlayer) {
+        currentPlayer.score = Math.max(
+            0,
+            currentPlayer.score - 1
+        );
+    }
+
+    finishCurrentRound(room);
+}
+
+function handleNennenAnswer(player, answer) {
+    const room = getRoomOfPlayer(player);
+
+    if (!room || room.phase !== "nennen") {
+        return;
+    }
+
+    const game = room.game;
+
+    if (!game) return;
+
+    if (game.currentPlayerId !== player.id) {
+        sendError(
+            [...player.connections][0],
+            "Du bist gerade nicht an der Reihe."
+        );
+        return;
+    }
+
+    const normalizedAnswer = String(answer || "")
+        .trim()
+        .toLowerCase();
+
+    if (!normalizedAnswer) {
+        return;
+    }
+
+    if (
+        game.submitted &&
+        game.submitted[player.id]
+    ) {
+        return;
+    }
+
+    game.submitted[player.id] = normalizedAnswer;
+
+    /*
+        Die Runde gilt als geschafft, wenn eine gültige
+        Antwort abgegeben wurde.
+    */
+    const expectedWord = String(game.word || "")
+        .trim()
+        .toLowerCase();
+
+    if (
+        normalizedAnswer === expectedWord
+    ) {
+        player.score += 1;
+
+        finishCurrentRound(room);
+    } else {
+        /*
+            Falsche Antwort beendet die Runde.
+        */
+        finishCurrentRound(room);
+    }
+}
+
+/* =========================================================
+   QUIZ
+   ========================================================= */
+
+function prepareQuizRound(room) {
+    clearRoomTimers(room);
+
+    room.phase = "quiz";
+
+    const selected = shuffle(quizQuestions).slice(
+        0,
+        Math.min(5, quizQuestions.length)
+    );
+
+    room.game = {
+        questions: selected,
+        questionIndex: 0,
+
+        question:
+            selected[0]?.question || "",
+
+        answers:
+            selected[0]?.answers || [],
+
+        correct:
+            selected[0]?.correct ?? null,
+
+        questionNumber: 1,
+
+        totalQuestions: selected.length,
+
+        submitted: {}
+    };
+
+    broadcastState(room);
+}
+
+function handleQuizAnswer(player, answerIndex) {
+    const room = getRoomOfPlayer(player);
+
+    if (!room || room.phase !== "quiz") {
+        return;
+    }
+
+    if (!room.game) return;
+
+    const index = Number(answerIndex);
+
+    if (
+        !Number.isInteger(index) ||
+        index < 0 ||
+        index >= room.game.answers.length
+    ) {
+        return;
+    }
+
+    if (
+        room.game.submitted &&
+        room.game.submitted[player.id]
+    ) {
+        return;
+    }
+
+    room.game.submitted[player.id] = true;
+
+    const isCorrect =
+        index === room.game.correct;
+
+    if (isCorrect) {
+        player.score += 1;
+    }
+
+    const activePlayers =
+        getConnectedActivePlayers(room);
+
+    const allSubmitted =
+        activePlayers.length > 0 &&
+        activePlayers.every(
+            p => room.game.submitted[p.id]
+        );
+
+    broadcastState(room);
+
+    if (allSubmitted) {
+        advanceQuizQuestion(room);
+    }
+}
+
+function advanceQuizQuestion(room) {
+    if (!room.game) return;
+
+    room.game.questionIndex++;
+
+    if (
+        room.game.questionIndex >=
+        room.game.questions.length
+    ) {
+        finishCurrentRound(room);
+        return;
+    }
+
+    const next =
+        room.game.questions[
+            room.game.questionIndex
+        ];
+
+    room.game.question = next.question;
+    room.game.answers = next.answers;
+    room.game.correct = next.correct;
+    room.game.questionNumber =
+        room.game.questionIndex + 1;
+    room.game.submitted = {};
+
+    broadcastState(room);
+}
+
+/* =========================================================
+   ESTIMATE
+   ========================================================= */
+
+function prepareEstimateRound(room) {
+    clearRoomTimers(room);
+
+    room.phase = "estimate";
+
+    const selected = shuffle(estimateQuestions).slice(
+        0,
+        Math.min(5, estimateQuestions.length)
+    );
+
+    room.game = {
+        questions: selected,
+        questionIndex: 0,
+
+        estimateQuestion:
+            selected[0]?.question || "",
+
+        correctEstimate:
+            selected[0]?.answer ?? null,
+
+        questionNumber: 1,
+
+        totalQuestions: selected.length,
+
+        submitted: {},
+
+        answers: {}
+    };
+
+    broadcastState(room);
+}
+
+function handleEstimateAnswer(player, value) {
+    const room = getRoomOfPlayer(player);
+
+    if (!room || room.phase !== "estimate") {
+        return;
+    }
+
+    if (!room.game) return;
+
+    if (
+        room.game.submitted &&
+        room.game.submitted[player.id]
+    ) {
+        return;
+    }
+
+    const numericValue = Number(value);
+
+    if (!Number.isFinite(numericValue)) {
+        return;
+    }
+
+    const correct =
+        Number(room.game.correctEstimate);
+
+    if (!Number.isFinite(correct)) {
+        return;
+    }
+
+    const difference =
+        Math.abs(numericValue - correct);
+
+    const percentDifference =
+        correct === 0
+            ? difference === 0
+                ? 0
+                : Infinity
+            : (difference / Math.abs(correct)) * 100;
+
+    let points = 0;
+
+    if (difference === 0) {
+        points = 3;
+    } else if (percentDifference <= 5) {
+        points = 2;
+    } else if (percentDifference <= 15) {
+        points = 1;
+    }
+
+    player.score += points;
+
+    room.game.submitted[player.id] = true;
+
+    room.game.answers[player.id] = numericValue;
+
+    const activePlayers =
+        getConnectedActivePlayers(room);
+
+    const allSubmitted =
+        activePlayers.length > 0 &&
+        activePlayers.every(
+            p => room.game.submitted[p.id]
+        );
+
+    broadcastState(room);
+
+    if (allSubmitted) {
+        advanceEstimateQuestion(room);
+    }
+}
+
+function advanceEstimateQuestion(room) {
+    if (!room.game) return;
+
+    room.game.questionIndex++;
+
+    if (
+        room.game.questionIndex >=
+        room.game.questions.length
+    ) {
+        finishCurrentRound(room);
+        return;
+    }
+
+    const next =
+        room.game.questions[
+            room.game.questionIndex
+        ];
+
+    room.game.estimateQuestion =
+        next.question;
+
+    room.game.correctEstimate =
+        next.answer;
+
+    room.game.questionNumber =
+        room.game.questionIndex + 1;
+
+    room.game.submitted = {};
+    room.game.answers = {};
+
+    broadcastState(room);
+}
+
+/* =========================================================
+   RUNDENENDE
+   ========================================================= */
+
+function finishCurrentRound(room) {
+    if (!room) return;
+
+    clearRoomTimers(room);
+
+    room.phase = "results";
+
+    const activePlayers =
+        getActivePlayers(room);
+
+    room.results = activePlayers
+        .map(player => ({
+            id: player.id,
+            name: player.name,
+            roundScore: player.score || 0,
+            totalScore: player.score || 0
+        }))
+        .sort(
+            (a, b) =>
+                b.roundScore - a.roundScore
+        );
+
+    broadcastState(room);
+
+    if (room.round >= room.totalRounds) {
+        finishGame(room);
+    }
+}
+
+function continueNextRound(room) {
+    if (!room) return;
+
+    if (room.round >= room.totalRounds) {
+        finishGame(room);
+        return;
+    }
+
+    room.round++;
+
+    if (room.category === "nennen") {
+        prepareNennenRound(room);
+    } else if (room.category === "quiz") {
+        prepareQuizRound(room);
+    } else if (room.category === "estimate") {
+        prepareEstimateRound(room);
+    }
+}
+
+function finishGame(room) {
+    clearRoomTimers(room);
+
+    room.phase = "final";
+
+    const activePlayers =
+        getActivePlayers(room);
+
+    const ranking = activePlayers
+        .map(player => ({
+            id: player.id,
+            name: player.name,
+            score: player.score || 0
+        }))
+        .sort(
+            (a, b) =>
+                b.score - a.score
+        );
+
+    room.winner = ranking[0] || null;
+
+    broadcastState(room);
+}
+
+/* =========================================================
+   HTTP SERVER
+   ========================================================= */
+
+const server = http.createServer(
+    (request, response) => {
+        try {
+            let requestPath =
+                decodeURIComponent(
+                    request.url.split("?")[0]
+                );
+
+            if (requestPath === "/") {
+                requestPath = "/index.html";
+            }
+
+            const filePath = path.join(
+                __dirname,
+                requestPath
+            );
+
+            /*
+                Verhindert Zugriff außerhalb
+                des Projektordners.
+            */
+            const normalizedPath =
+                path.normalize(filePath);
+
+            if (
+                !normalizedPath.startsWith(
+                    path.normalize(__dirname)
+                )
+            ) {
+                response.writeHead(403);
+                response.end("Forbidden");
+                return;
+            }
+
+            fs.stat(
+                normalizedPath,
+                (error, stats) => {
+                    if (error || !stats.isFile()) {
+                        response.writeHead(404);
+                        response.end("Not found");
+                        return;
+                    }
+
+                    const ext =
+                        path.extname(normalizedPath)
+                            .toLowerCase();
+
+                    const mimeTypes = {
+                        ".html": "text/html; charset=utf-8",
+                        ".js": "text/javascript; charset=utf-8",
+                        ".css": "text/css; charset=utf-8",
+                        ".json": "application/json; charset=utf-8",
+                        ".png": "image/png",
+                        ".jpg": "image/jpeg",
+                        ".jpeg": "image/jpeg",
+                        ".gif": "image/gif",
+                        ".svg": "image/svg+xml",
+                        ".ico": "image/x-icon",
+                        ".webp": "image/webp"
+                    };
+
+                    response.writeHead(200, {
+                        "Content-Type":
+                            mimeTypes[ext] ||
+                            "application/octet-stream"
+                    });
+
+                    fs.createReadStream(
+                        normalizedPath
+                    ).pipe(response);
+                }
+            );
+        } catch (error) {
+            console.error(
+                "HTTP-Fehler:",
+                error
+            );
+
+            response.writeHead(500);
+            response.end("Internal Server Error");
+        }
+    }
+);
+
+/* =========================================================
+   WEBSOCKET
+   ========================================================= */
+
+const wss = new WebSocket.Server({
+    server
+});
+
+wss.on("connection", socket => {
+    clients.add(socket);
+
+    socket.on("message", raw => {
+        let data;
+
+        try {
+            data = JSON.parse(
+                raw.toString()
+            );
+        } catch {
+            sendError(
+                socket,
+                "Ungültige Nachricht."
+            );
+            return;
+        }
+
+        handleMessage(socket, data);
+    });
+
+    socket.on("close", () => {
+        clients.delete(socket);
+
+        handleDisconnect(socket);
+    });
+
+    socket.on("error", error => {
+        console.error(
+            "WebSocket Fehler:",
+            error
+        );
+    });
+});
+
+/* =========================================================
+   MESSAGE HANDLER
+   ========================================================= */
+
+function handleMessage(socket, data) {
+    const type = data?.type;
+
+    switch (type) {
+        case "identify":
+            handleIdentify(socket, data);
+            break;
+
+        case "create_room":
+            handleCreateRoom(socket, data);
+            break;
+
+        case "join_room":
+            handleJoinRoom(socket, data);
+            break;
+
+        case "leave_room":
+            handleLeaveRoom(socket);
+            break;
+
+        case "set_playing":
+            handleSetPlaying(socket, data);
+            break;
+
+        case "start_game":
+            handleStartGame(socket, data);
+            break;
+
+        case "start_category":
+            handleStartCategory(socket, data);
+            break;
+
+        case "nennen_answer":
+            handleNennenMessage(socket, data);
+            break;
+
+        case "quiz_answer":
+            handleQuizMessage(socket, data);
+            break;
+
+        case "estimate_answer":
+            handleEstimateMessage(socket, data);
+            break;
+
+        case "next_round":
+            handleNextRound(socket);
+            break;
+
+        case "restart":
+            handleRestart(socket);
+            break;
+
+        default:
+            sendError(
+                socket,
+                "Unbekannter Nachrichtentyp."
+            );
+    }
+}
+
+/* =========================================================
+   IDENTIFY
+   ========================================================= */
+
+function handleIdentify(socket, data) {
+    let identityId =
+        String(data.identityId || "")
+            .trim();
+
+    let playerId =
+        String(data.playerId || "")
+            .trim();
+
+    if (!identityId) {
+        identityId = randomId();
+    }
+
+    if (!playerId) {
+        playerId = randomId();
+    }
+
+    let player =
+        playersById.get(playerId);
+
+    if (!player) {
+        player = {
+            id: playerId,
+
+            identityId,
+
+            name: safeName(data.name),
+
+            owner: false,
+
+            playing: true,
+
+            roomCode: null,
+
+            score: 0,
+
+            connections: new Set()
+        };
+
+        playersById.set(
+            playerId,
+            player
+        );
+    }
+
+    player.identityId = identityId;
+
+    if (data.name) {
+        player.name = safeName(data.name);
+    }
+
+    player.connections.add(socket);
+
+    socket.playerId = player.id;
+
+    playersByIdentity.set(
+        identityId,
+        player
+    );
+
+    send(socket, {
+        type: "identified",
+
+        playerId: player.id,
+
+        identityId: player.identityId,
+
+        name: player.name
+    });
+
+    const room = getRoomOfPlayer(player);
+
+    if (room) {
+        send(socket, buildRoomState(room));
+    }
+}
+
+/* =========================================================
+   ROOM CREATE
+   ========================================================= */
+
+function handleCreateRoom(socket, data) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        sendError(
+            socket,
+            "Bitte zuerst identifizieren."
+        );
+        return;
+    }
+
+    if (player.roomCode) {
+        sendError(
+            socket,
+            "Du bist bereits in einem Raum."
+        );
+        return;
+    }
+
+    player.name = safeName(data.name);
+
+    player.owner = true;
+    player.playing =
+        data.playing !== false;
+
+    player.score = 0;
+
+    const room =
+        createRoom(player);
+
+    send(socket, {
+        type: "room_created",
+        roomCode: room.code
+    });
+
+    broadcastState(room);
+}
+
+/* =========================================================
+   JOIN ROOM
+   ========================================================= */
+
+function handleJoinRoom(socket, data) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        sendError(
+            socket,
+            "Bitte zuerst identifizieren."
+        );
+        return;
+    }
+
+    if (player.roomCode) {
+        sendError(
+            socket,
+            "Du bist bereits in einem Raum."
+        );
+        return;
+    }
+
+    const code =
+        String(data.roomCode || "")
+            .trim()
+            .toUpperCase();
+
+    const room =
+        rooms.get(code);
 
     if (!room) {
         sendError(
             socket,
-            "Dieser Raum existiert nicht."
+            "Raum nicht gefunden."
         );
-
         return;
     }
 
     if (room.phase !== "lobby") {
         sendError(
             socket,
-            "Dieses Spiel wurde bereits gestartet."
+            "Das Spiel wurde bereits gestartet."
         );
-
         return;
     }
 
-    const existing = findPlayerByIdentity(
-        room,
-        player.identityId
-    );
-
-    if (existing) {
-        existing.name = player.name || existing.name;
-
-        socket.player = existing;
-        socket.roomCode = room.code;
-
-        existing.connections.add(socket);
-
-        send(socket, {
-            type: "joinedRoom",
-            code: room.code
-        });
-
-        broadcastRoom(room);
-        broadcastOnlineCount();
-
-        return;
-    }
-
-    if (player.roomCode) {
-        if (player.roomCode === code) {
-            const currentRoom =
-                rooms.get(player.roomCode);
-
-            if (currentRoom) {
-                player.connections.add(socket);
-
-                socket.player = player;
-                socket.roomCode = player.roomCode;
-
-                send(socket, {
-                    type: "joinedRoom",
-                    code: currentRoom.code
-                });
-
-                broadcastRoom(currentRoom);
-
-                return;
-            }
-        }
-
-        sendError(
-            socket,
-            "Du bist bereits in einem anderen Raum."
-        );
-
-        return;
-    }
-
-    if (room.players.size >= 16) {
+    if (room.players.length >= MAX_PLAYERS) {
         sendError(
             socket,
             "Der Raum ist voll."
         );
-
         return;
     }
 
-    player.roomCode = room.code;
+    player.name =
+        safeName(data.name);
+
     player.owner = false;
+    player.playing = true;
+    player.roomCode = room.code;
     player.score = 0;
-    player.roundPoints = 0;
 
-    room.players.set(player.id, player);
-
-    socket.player = player;
-    socket.roomCode = room.code;
-
-    player.connections.add(socket);
+    room.players.push(player);
 
     send(socket, {
-        type: "joinedRoom",
-        code: room.code
+        type: "room_joined",
+        roomCode: room.code
     });
 
-    broadcastRoom(room);
+    broadcastState(room);
 }
 
-function attachSocketToPlayer(player, socket) {
-    socket.player = player;
-    socket.roomCode = player.roomCode || null;
+/* =========================================================
+   LEAVE
+   ========================================================= */
 
-    player.connections.add(socket);
-    clients.add(socket);
+function handleLeaveRoom(socket) {
+    const player =
+        getPlayerBySocket(socket);
 
-    send(socket, {
-        type: "identified",
-        playerId: player.id
-    });
+    if (!player) return;
 
-    if (player.roomCode) {
-        const room = rooms.get(player.roomCode);
+    const room =
+        getRoomOfPlayer(player);
 
-        if (room) {
-            send(socket, {
-                type: "state",
-                state: publicRoom(
-                    room,
-                    player.id
-                )
-            });
-        }
-    }
-
-    broadcastOnlineCount();
-}
-
-function removeSocket(socket) {
-    clients.delete(socket);
-
-    const player = socket.player;
-
-    if (!player) {
-        broadcastOnlineCount();
-        return;
-    }
-
-    player.connections.delete(socket);
-
-    broadcastOnlineCount();
-
-    if (player.roomCode) {
-        const room = rooms.get(player.roomCode);
-
-        if (room) {
-            broadcastRoom(room);
-        }
-    }
-}
-
-function leaveRoom(socket) {
-    const player = socket.player;
-
-    if (!player || !player.roomCode) {
-        send(socket, {
-            type: "leftRoom"
-        });
-
-        return;
-    }
-
-    const room = rooms.get(player.roomCode);
-
-    if (!room) {
-        player.roomCode = null;
-
-        send(socket, {
-            type: "leftRoom"
-        });
-
-        return;
-    }
+    if (!room) return;
 
     if (player.owner) {
-        clearNennenTimer(room);
-
-        for (const other of room.players.values()) {
-            other.roomCode = null;
-
-            for (const otherSocket of other.connections) {
-                send(otherSocket, {
-                    type: "leftRoom"
-                });
-            }
-        }
-
-        rooms.delete(room.code);
-
-        broadcastOnlineCount();
-
+        closeRoom(room);
         return;
     }
 
-    room.players.delete(player.id);
+    removePlayerFromRoom(
+        player,
+        room
+    );
 
-    player.roomCode = null;
-    player.connections.clear();
-
-    send(socket, {
-        type: "leftRoom"
-    });
-
-    if (room.players.size === 0) {
-        clearNennenTimer(room);
-        rooms.delete(room.code);
-    } else {
-        broadcastRoom(room);
-    }
+    broadcastState(room);
 }
 
-function handleMessage(socket, message) {
-    let data;
+/* =========================================================
+   PLAYING TOGGLE
+   ========================================================= */
 
-    try {
-        data = JSON.parse(message.toString());
-    } catch {
+function handleSetPlaying(socket, data) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) return;
+
+    if (!player.owner) {
+        return;
+    }
+
+    const room =
+        getRoomOfPlayer(player);
+
+    if (!room) return;
+
+    if (room.phase !== "lobby") {
+        return;
+    }
+
+    player.playing =
+        data.playing === true;
+
+    broadcastState(room);
+}
+
+/* =========================================================
+   START GAME
+   ========================================================= */
+
+function handleStartGame(socket, data) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) return;
+
+    const room =
+        getRoomOfPlayer(player);
+
+    if (!room) {
         sendError(
             socket,
-            "Ungültige Nachricht."
+            "Du bist in keinem Raum."
         );
-
         return;
     }
 
-    if (data.type === "identify") {
-        const identityId = String(
-            data.identityId || ""
-        )
-            .trim()
-            .slice(0, 200);
-
-        if (!identityId) {
-            sendError(
-                socket,
-                "Keine Browser-ID vorhanden."
-            );
-
-            return;
-        }
-
-        let player = null;
-
-        for (const room of rooms.values()) {
-            const found = findPlayerByIdentity(
-                room,
-                identityId
-            );
-
-            if (found) {
-                player = found;
-                break;
-            }
-        }
-
-        if (!player) {
-            player = {
-                id: makePlayerId(),
-                identityId,
-                name: "",
-                owner: false,
-                roomCode: null,
-                score: 0,
-                roundPoints: 0,
-                connections: new Set()
-            };
-        }
-
-        attachSocketToPlayer(
-            player,
-            socket
-        );
-
-        return;
-    }
-
-    if (!socket.player) {
+    if (player.id !== room.ownerId) {
         sendError(
             socket,
-            "Verbindung wurde noch nicht identifiziert."
+            "Nur der Besitzer kann das Spiel starten."
         );
-
         return;
     }
 
-    const player = socket.player;
-
-    if (data.type === "createRoom") {
-        const name = cleanName(data.name);
-
-        if (!name) {
-            sendError(
-                socket,
-                "Bitte gib einen Namen ein."
-            );
-
-            return;
-        }
-
-        if (player.roomCode) {
-            sendError(
-                socket,
-                "Du bist bereits in einem Raum."
-            );
-
-            return;
-        }
-
-        player.name = name;
-
-        createRoom(
-            player,
-            socket
-        );
-
-        return;
-    }
-
-    if (data.type === "joinRoom") {
-        const name = cleanName(data.name);
-
-        const code = String(
-            data.code || ""
-        )
-            .trim()
-            .toUpperCase();
-
-        if (!name) {
-            sendError(
-                socket,
-                "Bitte gib einen Namen ein."
-            );
-
-            return;
-        }
-
-        if (!/^[A-Z0-9]{5}$/.test(code)) {
-            sendError(
-                socket,
-                "Der Raumcode muss 5 Zeichen haben."
-            );
-
-            return;
-        }
-
-        player.name = name;
-
-        if (player.roomCode) {
-            if (player.roomCode === code) {
-                const room = rooms.get(code);
-
-                if (room) {
-                    const existing =
-                        findPlayerByIdentity(
-                            room,
-                            player.identityId
-                        );
-
-                    if (existing) {
-                        existing.name = name;
-
-                        socket.player = existing;
-                        socket.roomCode = room.code;
-
-                        existing.connections.add(
-                            socket
-                        );
-
-                        send(socket, {
-                            type: "joinedRoom",
-                            code: room.code
-                        });
-
-                        broadcastRoom(room);
-
-                        return;
-                    }
-                }
-            } else {
-                sendError(
-                    socket,
-                    "Du bist bereits in einem anderen Raum."
-                );
-
-                return;
-            }
-        }
-
-        joinRoom(
-            player,
+    if (room.phase !== "lobby") {
+        sendError(
             socket,
-            code
+            "Das Spiel läuft bereits."
         );
-
         return;
     }
 
-    if (data.type === "startGame") {
-        const room = rooms.get(
-            player.roomCode
+    const activePlayers =
+        getActivePlayers(room);
+
+    /*
+        WICHTIG:
+        IMMER mindestens 2 aktive Spieler.
+    */
+    if (activePlayers.length < 2) {
+        sendError(
+            socket,
+            "Mindestens 2 aktive Spieler werden benötigt."
         );
-
-        if (!room) {
-            sendError(
-                socket,
-                "Raum nicht gefunden."
-            );
-
-            return;
-        }
-
-        if (room.ownerId !== player.id) {
-            sendError(
-                socket,
-                "Nur der Besitzer kann das Spiel starten."
-            );
-
-            return;
-        }
-
-        if (getActivePlayers(room).length < 2) {
-            sendError(
-                socket,
-                "Mindestens 2 Mitspieler werden benötigt."
-            );
-
-            return;
-        }
-
-        room.phase = "category";
-        room.round = 1;
-        room.results = null;
-
-        for (const p of room.players.values()) {
-            p.score = 0;
-            p.roundPoints = 0;
-        }
-
-        broadcastRoom(room);
-
         return;
     }
 
-    if (data.type === "chooseCategory") {
-        const room = rooms.get(
-            player.roomCode
-        );
+    const category =
+        String(
+            data.category ||
+            ""
+        ).toLowerCase();
 
-        if (!room) {
-            sendError(
-                socket,
-                "Raum nicht gefunden."
-            );
-
-            return;
-        }
-
-        if (room.ownerId !== player.id) {
-            sendError(
-                socket,
-                "Nur der Besitzer kann die Kategorie auswählen."
-            );
-
-            return;
-        }
-
-        if (room.phase !== "category") {
-            sendError(
-                socket,
-                "Jetzt kann keine Kategorie gewählt werden."
-            );
-
-            return;
-        }
-
-        const category = String(
-            data.category || ""
-        );
-
-        if (
-            ![
-                "nennen",
-                "quiz",
-                "estimate"
-            ].includes(category)
-        ) {
-            sendError(
-                socket,
-                "Ungültige Kategorie."
-            );
-
-            return;
-        }
-
-        startCategory(
+    const result =
+        startGame(
             room,
             category
         );
 
+    if (!result.ok) {
+        sendError(
+            socket,
+            result.error
+        );
         return;
     }
 
-    if (data.type === "nennenAnswer") {
-        const room = rooms.get(
-            player.roomCode
-        );
-
-        if (
-            !room ||
-            room.phase !== "nennen" ||
-            !room.nennen
-        ) {
-            return;
-        }
-
-        if (
-            room.nennen.currentPlayerId !==
-            player.id
-        ) {
-            sendError(
-                socket,
-                "Du bist gerade nicht an der Reihe."
-            );
-
-            return;
-        }
-
-        if (Date.now() > room.nennen.turnEndsAt) {
-            endNennenRound(
-                room,
-                `${player.name} hat die Zeit überschritten.`
-            );
-
-            return;
-        }
-
-        const answer = String(
-            data.answer || ""
-        ).trim();
-
-        if (!answer) {
-            sendError(
-                socket,
-                "Bitte gib eine Antwort ein."
-            );
-
-            return;
-        }
-
-        const normalized =
-            normalizeAnswer(answer);
-
-        if (
-            room.nennen.usedAnswers.has(
-                normalized
-            )
-        ) {
-            endNennenRound(
-                room,
-                `${player.name} hat eine Antwort wiederholt.`
-            );
-
-            return;
-        }
-
-        const valid =
-            room.nennen.normalizedAnswers.has(
-                normalized
-            );
-
-        if (!valid) {
-            endNennenRound(
-                room,
-                `"${answer}" ist keine gültige Antwort.`
-            );
-
-            return;
-        }
-
-        room.nennen.usedAnswers.add(
-            normalized
-        );
-
-        player.roundPoints += 1;
-
-        const next = nextActivePlayer(
-            room,
-            player.id
-        );
-
-        if (!next) {
-            endNennenRound(
-                room,
-                "Keine weiteren Mitspieler."
-            );
-
-            return;
-        }
-
-        room.nennen.currentPlayerId =
-            next.id;
-
-        room.nennen.turnEndsAt =
-            Date.now() + 30000;
-
-        broadcastRoom(room);
-
-        scheduleNennenTimeout(room);
-
-        return;
-    }
-
-    if (data.type === "quizAnswer") {
-        const room = rooms.get(
-            player.roomCode
-        );
-
-        if (
-            !room ||
-            room.phase !== "quiz" ||
-            !room.quiz
-        ) {
-            return;
-        }
-
-        if (
-            room.quiz.currentPlayerId !==
-            player.id
-        ) {
-            sendError(
-                socket,
-                "Du bist gerade nicht an der Reihe."
-            );
-
-            return;
-        }
-
-        if (room.quiz.answered) {
-            return;
-        }
-
-        const index = Number(data.index);
-
-        if (
-            !Number.isInteger(index) ||
-            index < 0 ||
-            index >= room.quiz.answers.length
-        ) {
-            sendError(
-                socket,
-                "Ungültige Antwort."
-            );
-
-            return;
-        }
-
-        room.quiz.answered = true;
-
-        if (index === room.quiz.correct) {
-            player.roundPoints += 1;
-        }
-
-        broadcastRoom(room);
-
-        setTimeout(() => {
-            const currentRoom =
-                rooms.get(room.code);
-
-            if (
-                currentRoom &&
-                currentRoom.phase === "quiz" &&
-                currentRoom.quiz &&
-                currentRoom.quiz.answered
-            ) {
-                nextQuizQuestion(
-                    currentRoom
-                );
-            }
-        }, 1000);
-
-        return;
-    }
-
-    if (data.type === "estimateAnswer") {
-        const room = rooms.get(
-            player.roomCode
-        );
-
-        if (
-            !room ||
-            room.phase !== "estimate" ||
-            !room.estimate
-        ) {
-            return;
-        }
-
-        if (
-            room.estimate.currentPlayerId !==
-            player.id
-        ) {
-            sendError(
-                socket,
-                "Du bist gerade nicht an der Reihe."
-            );
-
-            return;
-        }
-
-        if (room.estimate.answered) {
-            return;
-        }
-
-        const value = Number(
-            String(data.answer || "")
-                .replace(",", ".")
-        );
-
-        if (!Number.isFinite(value)) {
-            sendError(
-                socket,
-                "Bitte gib eine Zahl ein."
-            );
-
-            return;
-        }
-
-        room.estimate.answered = true;
-
-        const correct =
-            room.estimate.answer;
-
-        const distance = Math.abs(
-            value - correct
-        );
-
-        let points = 0;
-
-        if (distance === 0) {
-            points = 3;
-        } else if (
-            distance <=
-            Math.max(1, correct * 0.05)
-        ) {
-            points = 2;
-        } else if (
-            distance <=
-            Math.max(2, correct * 0.15)
-        ) {
-            points = 1;
-        }
-
-        player.roundPoints += points;
-
-        broadcastRoom(room);
-
-        setTimeout(() => {
-            const currentRoom =
-                rooms.get(room.code);
-
-            if (
-                currentRoom &&
-                currentRoom.phase === "estimate" &&
-                currentRoom.estimate &&
-                currentRoom.estimate.answered
-            ) {
-                nextEstimateQuestion(
-                    currentRoom
-                );
-            }
-        }, 1000);
-
-        return;
-    }
-
-    if (data.type === "continueRound") {
-        const room = rooms.get(
-            player.roomCode
-        );
-
-        if (!room) {
-            return;
-        }
-
-        if (room.ownerId !== player.id) {
-            sendError(
-                socket,
-                "Nur der Besitzer kann fortfahren."
-            );
-
-            return;
-        }
-
-        if (room.phase !== "results") {
-            return;
-        }
-
-        for (const p of getActivePlayers(room)) {
-            p.score += p.roundPoints;
-            p.roundPoints = 0;
-        }
-
-        if (room.round >= room.totalRounds) {
-            room.phase = "final";
-
-            broadcastRoom(room);
-
-            return;
-        }
-
-        room.round += 1;
-
-        room.phase = "category";
-
-        room.nennen = null;
-        room.quiz = null;
-        room.estimate = null;
-        room.results = null;
-
-        broadcastRoom(room);
-
-        return;
-    }
-
-    if (data.type === "leaveRoom") {
-        leaveRoom(socket);
-        return;
-    }
+    broadcastState(room);
 }
 
-const server = http.createServer(
-    (req, res) => {
-        let requested;
+/*
+    Optionaler Alias für Frontends,
+    die start_category verwenden.
+*/
+function handleStartCategory(
+    socket,
+    data
+) {
+    handleStartGame(socket, {
+        type: "start_game",
+        category: data.category
+    });
+}
 
-        try {
-            requested = decodeURIComponent(
-                String(req.url || "/").split("?")[0]
-            );
-        } catch {
-            res.writeHead(400);
-            res.end("Bad Request");
-            return;
-        }
+/* =========================================================
+   NENNEN MESSAGE
+   ========================================================= */
 
-        if (requested === "/") {
-            requested = "/index.html";
-        }
+function handleNennenMessage(
+    socket,
+    data
+) {
+    const player =
+        getPlayerBySocket(socket);
 
-        requested = requested.replace(
-            /^[/\\]+/,
-            ""
+    if (!player) return;
+
+    handleNennenAnswer(
+        player,
+        data.answer
+    );
+}
+
+/* =========================================================
+   QUIZ MESSAGE
+   ========================================================= */
+
+function handleQuizMessage(
+    socket,
+    data
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) return;
+
+    handleQuizAnswer(
+        player,
+        data.answerIndex
+    );
+}
+
+/* =========================================================
+   ESTIMATE MESSAGE
+   ========================================================= */
+
+function handleEstimateMessage(
+    socket,
+    data
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) return;
+
+    handleEstimateAnswer(
+        player,
+        data.answer
+    );
+}
+
+/* =========================================================
+   NEXT ROUND
+   ========================================================= */
+
+function handleNextRound(socket) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) return;
+
+    const room =
+        getRoomOfPlayer(player);
+
+    if (!room) return;
+
+    if (player.id !== room.ownerId) {
+        sendError(
+            socket,
+            "Nur der Besitzer kann die nächste Runde starten."
+        );
+        return;
+    }
+
+    if (room.phase !== "results") {
+        return;
+    }
+
+    const activePlayers =
+        getActivePlayers(room);
+
+    if (activePlayers.length < 2) {
+        finishGame(room);
+        return;
+    }
+
+    continueNextRound(room);
+}
+
+/* =========================================================
+   RESTART
+   ========================================================= */
+
+function handleRestart(socket) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) return;
+
+    const room =
+        getRoomOfPlayer(player);
+
+    if (!room) return;
+
+    if (player.id !== room.ownerId) {
+        sendError(
+            socket,
+            "Nur der Besitzer kann neu starten."
+        );
+        return;
+    }
+
+    clearRoomTimers(room);
+
+    room.phase = "lobby";
+    room.category = null;
+    room.round = 0;
+    room.game = null;
+    room.results = [];
+    room.winner = null;
+
+    for (const p of room.players) {
+        p.score = 0;
+    }
+
+    broadcastState(room);
+}
+
+/* =========================================================
+   DISCONNECT
+   ========================================================= */
+
+function handleDisconnect(socket) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) return;
+
+    player.connections.delete(socket);
+
+    /*
+        Spieler bleibt im Raum, wenn nur eine
+        einzelne Verbindung getrennt wurde.
+    */
+    if (
+        player.connections.size > 0
+    ) {
+        return;
+    }
+
+    const room =
+        getRoomOfPlayer(player);
+
+    if (!room) return;
+
+    /*
+        Besitzer verlässt -> kompletter Raum weg.
+    */
+    if (player.owner) {
+        closeRoom(room);
+        return;
+    }
+
+    /*
+        Im laufenden Spiel entfernen wir den
+        normalen Spieler.
+    */
+    if (room.phase !== "lobby") {
+        removePlayerFromRoom(
+            player,
+            room
         );
 
-        const filePath = path.resolve(
-            __dirname,
-            requested
-        );
-
-        const rootPath = path.resolve(
-            __dirname
-        );
+        const activePlayers =
+            getConnectedActivePlayers(room);
 
         if (
-            filePath !== rootPath &&
-            !filePath.startsWith(
-                rootPath + path.sep
-            )
+            activePlayers.length < 2
         ) {
-            res.writeHead(403);
-            res.end("Forbidden");
+            finishGame(room);
             return;
         }
 
-        fs.readFile(
-            filePath,
-            (error, data) => {
-                if (error) {
-                    res.writeHead(
-                        404,
-                        {
-                            "Content-Type":
-                                "text/plain; charset=utf-8"
-                        }
-                    );
-
-                    res.end(
-                        "404 - Datei nicht gefunden"
-                    );
-
-                    return;
-                }
-
-                const extension =
-                    path.extname(filePath)
-                        .toLowerCase();
-
-                const contentTypes = {
-                    ".html":
-                        "text/html; charset=utf-8",
-
-                    ".css":
-                        "text/css; charset=utf-8",
-
-                    ".js":
-                        "application/javascript; charset=utf-8",
-
-                    ".json":
-                        "application/json; charset=utf-8",
-
-                    ".png":
-                        "image/png",
-
-                    ".jpg":
-                        "image/jpeg",
-
-                    ".jpeg":
-                        "image/jpeg",
-
-                    ".gif":
-                        "image/gif",
-
-                    ".svg":
-                        "image/svg+xml",
-
-                    ".ico":
-                        "image/x-icon"
-                };
-
-                res.writeHead(
-                    200,
-                    {
-                        "Content-Type":
-                            contentTypes[
-                                extension
-                            ] ||
-                            "application/octet-stream",
-
-                        "Cache-Control":
-                            "no-store, no-cache, must-revalidate, proxy-revalidate",
-
-                        Pragma: "no-cache",
-
-                        Expires: "0"
-                    }
-                );
-
-                res.end(data);
-            }
-        );
+        broadcastState(room);
+        return;
     }
-);
 
-const wss = new WebSocket.Server({
-    server
-});
+    broadcastState(room);
+}
 
-wss.on(
-    "connection",
-    socket => {
-        clients.add(socket);
-
-        socket.on(
-            "message",
-            message => {
-                handleMessage(
-                    socket,
-                    message
-                );
-            }
-        );
-
-        socket.on(
-            "close",
-            () => {
-                removeSocket(socket);
-            }
-        );
-
-        socket.on(
-            "error",
-            () => {
-                removeSocket(socket);
-            }
-        );
-
-        broadcastOnlineCount();
-    }
-);
+/* =========================================================
+   SERVER START
+   ========================================================= */
 
 server.listen(
     PORT,
     HOST,
     () => {
-        console.log("");
         console.log(
-            "=========================================="
+            `Minecraft Last Man Standing läuft auf ${HOST}:${PORT}`
         );
+
         console.log(
-            "   MINECRAFT LAST MAN STANDING"
+            `Umgebungs-Port: ${
+                process.env.PORT || "nicht gesetzt"
+            }`
         );
-        console.log(
-            "=========================================="
-        );
-        console.log("");
-        console.log(
-            `Server läuft auf Port ${PORT}`
-        );
-        console.log(
-            `HTTP: http://localhost:${PORT}`
-        );
-        console.log(
-            `WebSocket: ws://localhost:${PORT}`
-        );
-        console.log("");
-        console.log(
-            "Server läuft."
-        );
-        console.log("");
     }
 );
 
+process.on(
+    "SIGINT",
+    () => {
+        console.log(
+            "Server wird beendet..."
+        );
+
+        for (const room of rooms.values()) {
+            clearRoomTimers(room);
+        }
+
+        server.close(() => {
+            process.exit(0);
+        });
+    }
+);
