@@ -1,10 +1,11 @@
+
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const WebSocket = require("ws");
 
-const HOST = "127.0.0.1";
-const PORT = 5500;
+const HOST = "0.0.0.0";
+const PORT = Number(process.env.PORT) || 5500;
 
 const rooms = new Map();
 const clients = new Set();
@@ -16,7 +17,6 @@ const NENNEN_ROUNDS = [
         title: "Alle Minecraft-Verzauberungen",
         description:
             "Nennt abwechselnd eine gültige Minecraft-Verzauberung. Keine Wiederholungen.",
-        type: "enchantments",
         answers: [
             "Aqua Affinity",
             "Bane of Arthropods",
@@ -40,6 +40,7 @@ const NENNEN_ROUNDS = [
             "Loyalty",
             "Luck of the Sea",
             "Lure",
+            "Lunch",
             "Mending",
             "Multishot",
             "Piercing",
@@ -66,7 +67,6 @@ const NENNEN_ROUNDS = [
         title: "Alle essbaren Items",
         description:
             "Nennt abwechselnd ein essbares Minecraft-Item. Keine Wiederholungen.",
-        type: "food",
         answers: [
             "Apfel",
             "Goldener Apfel",
@@ -82,12 +82,18 @@ const NENNEN_ROUNDS = [
             "Pilzsuppe",
             "Kaninchenragout",
             "Steak",
-            "Gebratenes Schweinekotelett",
+            "Gebratenes Schweinekotlett",
+            "Rohes Schweinekotlett",
             "Gebratenes Hühnchen",
+            "Rohes Hühnchen",
             "Gebratener Kabeljau",
+            "Roher Kabeljau",
             "Gebratener Lachs",
+            "Roher Lachs",
             "Gebratenes Hammelfleisch",
+            "Rohes Hammelfleisch",
             "Gebratenes Kaninchen",
+            "Rohes Kaninchen",
             "Getrockneter Seetang",
             "Melonenscheibe",
             "Kürbiskuchen",
@@ -97,9 +103,10 @@ const NENNEN_ROUNDS = [
             "Leuchtbeeren",
             "Chorusfrucht",
             "Honigflasche",
-            "Milch",
-            "Fisch",
-            "Kugelfisch"
+            "Kugelfisch",
+            "Verrottetes Fleisch",
+            "Spinnenauge"
+
         ]
     },
 
@@ -107,13 +114,12 @@ const NENNEN_ROUNDS = [
         title: "Mobs, die nicht immer angreifen",
         description:
             "Nennt abwechselnd einen Mob, der den Spieler nicht immer automatisch angreift. Keine Wiederholungen.",
-        type: "mobs",
         answers: [
             "Axolotl",
             "Biene",
             "Eisbär",
             "Fuchs",
-            "Geist",
+            "Ghast",
             "Huhn",
             "Kuh",
             "Katze",
@@ -298,8 +304,7 @@ function shuffle(array) {
 }
 
 function makeRoomCode() {
-    const chars =
-        "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
     let code;
 
@@ -308,9 +313,7 @@ function makeRoomCode() {
 
         for (let i = 0; i < 5; i++) {
             code += chars[
-                Math.floor(
-                    Math.random() * chars.length
-                )
+                Math.floor(Math.random() * chars.length)
             ];
         }
     } while (rooms.has(code));
@@ -336,14 +339,13 @@ function normalizeAnswer(value) {
         .replace(/ß/g, "ss")
         .normalize("NFD")
         .replace(/[\u0300-\u036f]/g, "")
-        .replace(/[^a-z0-9äöü\s-]/gi, "")
+        .replace(/[^a-z0-9\s-]/gi, "")
         .replace(/\s+/g, " ");
 }
 
 function findPlayerByIdentity(room, identityId) {
     return [...room.players.values()].find(
-        player =>
-            player.identityId === identityId
+        player => player.identityId === identityId
     );
 }
 
@@ -356,9 +358,7 @@ function send(socket, message) {
     }
 
     try {
-        socket.send(
-            JSON.stringify(message)
-        );
+        socket.send(JSON.stringify(message));
     } catch (_) {}
 }
 
@@ -378,163 +378,81 @@ function sendErrorToRoom(room, message) {
 }
 
 function getPlayerName(room, playerId) {
-    return (
-        room.players.get(playerId)?.name ||
-        "Spieler"
-    );
+    return room.players.get(playerId)?.name || "Spieler";
 }
 
-function publicRoom(
-    room,
-    viewerPlayerId
-) {
+function publicRoom(room, viewerPlayerId) {
     const players = [
         ...room.players.values()
     ].map(player => ({
         id: player.id,
         name: player.name,
         owner: player.owner,
-        connected:
-            player.connections.size > 0,
+        connected: player.connections.size > 0,
         score: player.score,
-        roundPoints:
-            player.roundPoints
+        roundPoints: player.roundPoints
     }));
 
-    const viewer =
-        room.players.get(
-            viewerPlayerId
-        );
+    const viewer = room.players.get(viewerPlayerId);
 
     return {
         code: room.code,
-
-        ownerId:
-            room.ownerId,
-
-        isOwner:
-            !!viewer &&
-            viewer.id === room.ownerId,
-
-        myPlayerId:
-            viewerPlayerId || null,
-
+        ownerId: room.ownerId,
+        isOwner: !!viewer && viewer.id === room.ownerId,
+        myPlayerId: viewerPlayerId || null,
         players,
-
-        phase:
-            room.phase,
-
-        round:
-            room.round,
-
-        totalRounds:
-            room.totalRounds,
+        phase: room.phase,
+        round: room.round,
+        totalRounds: room.totalRounds,
 
         nennen: room.nennen
             ? {
-                  round:
-                      room.nennen.round,
-
-                  totalRounds:
-                      room.nennen
-                          .totalRounds,
-
-                  title:
-                      room.nennen.title,
-
-                  description:
-                      room.nennen
-                          .description,
-
+                  round: room.nennen.round,
+                  totalRounds: room.nennen.totalRounds,
+                  title: room.nennen.title,
+                  description: room.nennen.description,
                   currentPlayerId:
-                      room.nennen
-                          .currentPlayerId,
-
+                      room.nennen.currentPlayerId,
                   usedAnswers: [
-                      ...room.nennen
-                          .usedAnswers
+                      ...room.nennen.usedAnswers
                   ],
-
-                  turnEndsAt:
-                      room.nennen
-                          .turnEndsAt
+                  turnEndsAt: room.nennen.turnEndsAt
               }
             : null,
 
         quiz: room.quiz
             ? {
-                  round:
-                      room.quiz.round,
-
-                  totalRounds:
-                      room.quiz
-                          .totalRounds,
-
-                  number:
-                      room.quiz.number,
-
-                  totalQuestions:
-                      room.quiz
-                          .totalQuestions,
-
-                  question:
-                      room.quiz.question,
-
-                  answers:
-                      room.quiz.answers,
-
+                  round: room.quiz.round,
+                  totalRounds: room.quiz.totalRounds,
+                  number: room.quiz.number,
+                  totalQuestions: room.quiz.totalQuestions,
+                  question: room.quiz.question,
+                  answers: room.quiz.answers,
                   currentPlayerId:
-                      room.quiz
-                          .currentPlayerId,
-
-                  answered:
-                      room.quiz.answered
+                      room.quiz.currentPlayerId,
+                  answered: room.quiz.answered
               }
             : null,
 
         estimate: room.estimate
             ? {
-                  round:
-                      room.estimate
-                          .round,
-
-                  totalRounds:
-                      room.estimate
-                          .totalRounds,
-
-                  number:
-                      room.estimate.number,
-
+                  round: room.estimate.round,
+                  totalRounds: room.estimate.totalRounds,
+                  number: room.estimate.number,
                   totalQuestions:
-                      room.estimate
-                          .totalQuestions,
-
-                  question:
-                      room.estimate.question,
-
+                      room.estimate.totalQuestions,
+                  question: room.estimate.question,
                   currentPlayerId:
-                      room.estimate
-                          .currentPlayerId,
-
-                  answered:
-                      room.estimate
-                          .answered
+                      room.estimate.currentPlayerId,
+                  answered: room.estimate.answered
               }
             : null,
 
         results: room.results
             ? {
-                  category:
-                      room.results
-                          .category,
-
-                  message:
-                      room.results
-                          .message,
-
-                  players:
-                      room.results
-                          .players
+                  category: room.results.category,
+                  message: room.results.message,
+                  players: room.results.players
               }
             : null
     };
@@ -544,10 +462,7 @@ function broadcastRoom(room) {
     for (const player of room.players.values()) {
         const data = {
             type: "state",
-            state: publicRoom(
-                room,
-                player.id
-            )
+            state: publicRoom(room, player.id)
         };
 
         for (const socket of player.connections) {
@@ -570,39 +485,25 @@ function broadcastOnlineCount() {
 function getActivePlayers(room) {
     return [
         ...room.players.values()
-    ].filter(
-        player => !player.owner
-    );
+    ].filter(player => !player.owner);
 }
 
 function getConnectedActivePlayers(room) {
-    return getActivePlayers(
-        room
-    ).filter(
-        player =>
-            player.connections.size > 0
+    return getActivePlayers(room).filter(
+        player => player.connections.size > 0
     );
 }
 
-function nextActivePlayer(
-    room,
-    currentPlayerId
-) {
-    const players =
-        getConnectedActivePlayers(
-            room
-        );
+function nextActivePlayer(room, currentPlayerId) {
+    const players = getConnectedActivePlayers(room);
 
     if (!players.length) {
         return null;
     }
 
-    const index =
-        players.findIndex(
-            player =>
-                player.id ===
-                currentPlayerId
-        );
+    const index = players.findIndex(
+        player => player.id === currentPlayerId
+    );
 
     if (index === -1) {
         return players[0];
@@ -615,19 +516,13 @@ function nextActivePlayer(
 
 function clearNennenTimer(room) {
     if (room.nennenTimer) {
-        clearTimeout(
-            room.nennenTimer
-        );
-
+        clearTimeout(room.nennenTimer);
         room.nennenTimer = null;
     }
 }
 
 function startNennen(room) {
-    const players =
-        getConnectedActivePlayers(
-            room
-        );
+    const players = getConnectedActivePlayers(room);
 
     if (players.length < 2) {
         sendErrorToRoom(
@@ -641,62 +536,37 @@ function startNennen(room) {
     clearNennenTimer(room);
 
     const roundIndex =
-        (room.round - 1) %
-        NENNEN_ROUNDS.length;
+        (room.round - 1) % NENNEN_ROUNDS.length;
 
-    const topic =
-        NENNEN_ROUNDS[
-            roundIndex
-        ];
+    const topic = NENNEN_ROUNDS[roundIndex];
 
-    room.phase =
-        "nennen";
+    room.phase = "nennen";
 
     room.nennen = {
-        round:
-            room.round,
+        round: room.round,
+        totalRounds: room.totalRounds,
+        title: topic.title,
+        description: topic.description,
+        answers: topic.answers,
 
-        totalRounds:
-            room.totalRounds,
+        normalizedAnswers: new Map(
+            topic.answers.map(answer => [
+                normalizeAnswer(answer),
+                answer
+            ])
+        ),
 
-        title:
-            topic.title,
+        usedAnswers: new Set(),
 
-        description:
-            topic.description,
+        currentPlayerId: players[0].id,
 
-        answers:
-            topic.answers,
-
-        normalizedAnswers:
-            new Map(
-                topic.answers.map(
-                    answer => [
-                        normalizeAnswer(
-                            answer
-                        ),
-                        answer
-                    ]
-                )
-            ),
-
-        usedAnswers:
-            new Set(),
-
-        currentPlayerId:
-            players[0].id,
-
-        turnEndsAt:
-            Date.now() + 30000
+        turnEndsAt: Date.now() + 30000
     };
 
     room.results = null;
 
     broadcastRoom(room);
-
-    scheduleNennenTimeout(
-        room
-    );
+    scheduleNennenTimeout(room);
 
     return true;
 }
@@ -708,111 +578,71 @@ function scheduleNennenTimeout(room) {
         return;
     }
 
-    const roomCode =
-        room.code;
-
+    const roomCode = room.code;
     const expectedPlayer =
-        room.nennen
-            .currentPlayerId;
+        room.nennen.currentPlayerId;
 
     const expectedEnd =
-        room.nennen
-            .turnEndsAt;
+        room.nennen.turnEndsAt;
 
-    room.nennenTimer =
-        setTimeout(() => {
-            const currentRoom =
-                rooms.get(
-                    roomCode
-                );
+    room.nennenTimer = setTimeout(() => {
+        const currentRoom = rooms.get(roomCode);
 
-            if (
-                !currentRoom ||
-                currentRoom.phase !==
-                    "nennen"
-            ) {
-                return;
-            }
+        if (
+            !currentRoom ||
+            currentRoom.phase !== "nennen" ||
+            !currentRoom.nennen
+        ) {
+            return;
+        }
 
-            if (
-                !currentRoom.nennen
-            ) {
-                return;
-            }
+        if (
+            currentRoom.nennen.currentPlayerId !==
+                expectedPlayer ||
+            currentRoom.nennen.turnEndsAt !==
+                expectedEnd
+        ) {
+            return;
+        }
 
-            if (
-                currentRoom.nennen
-                    .currentPlayerId !==
-                    expectedPlayer ||
-                currentRoom.nennen
-                    .turnEndsAt !==
-                    expectedEnd
-            ) {
-                return;
-            }
-
-            endNennenRound(
+        endNennenRound(
+            currentRoom,
+            `${getPlayerName(
                 currentRoom,
-                `${getPlayerName(
-                    currentRoom,
-                    expectedPlayer
-                )} hat die Zeit überschritten.`
-            );
-        }, 30100);
+                expectedPlayer
+            )} hat die Zeit überschritten.`
+        );
+    }, 30100);
 }
 
-function endNennenRound(
-    room,
-    message
-) {
-    if (
-        room.phase !==
-        "nennen"
-    ) {
+function endNennenRound(room, message) {
+    if (room.phase !== "nennen") {
         return;
     }
 
     clearNennenTimer(room);
 
     room.results = {
-        category:
-            "nennen",
-
+        category: "nennen",
         message,
 
-        players:
-            getActivePlayers(room)
-                .map(player => ({
-                    id:
-                        player.id,
-
-                    name:
-                        player.name,
-
-                    points:
-                        player.roundPoints,
-
-                    score:
-                        player.score
-                }))
-                .sort(
-                    (a, b) =>
-                        b.points -
-                        a.points
-                )
+        players: getActivePlayers(room)
+            .map(player => ({
+                id: player.id,
+                name: player.name,
+                points: player.roundPoints,
+                score: player.score
+            }))
+            .sort((a, b) => b.points - a.points)
     };
 
-    room.phase =
-        "results";
+    room.phase = "results";
 
     broadcastRoom(room);
 }
 
 function startQuiz(room) {
-    const players =
-        getConnectedActivePlayers(
-            room
-        );
+    const players = getConnectedActivePlayers(room);
 
     if (players.length < 2) {
         sendErrorToRoom(
@@ -823,54 +653,27 @@ function startQuiz(room) {
         return false;
     }
 
-    const questions =
-        shuffle(
-            QUIZ_QUESTIONS
-        ).slice(
-            0,
-            Math.min(
-                5,
-                QUIZ_QUESTIONS.length
-            )
-        );
+    const questions = shuffle(QUIZ_QUESTIONS).slice(
+        0,
+        Math.min(5, QUIZ_QUESTIONS.length)
+    );
 
-    room.quizQuestions =
-        questions;
+    room.quizQuestions = questions;
 
     room.quiz = {
-        round:
-            room.round,
-
-        totalRounds:
-            room.totalRounds,
-
-        number:
-            1,
-
-        totalQuestions:
-            questions.length,
-
-        question:
-            questions[0].question,
-
-        answers:
-            questions[0].answers,
-
-        correct:
-            questions[0].correct,
-
-        currentPlayerId:
-            players[0].id,
-
-        answered:
-            false
+        round: room.round,
+        totalRounds: room.totalRounds,
+        number: 1,
+        totalQuestions: questions.length,
+        question: questions[0].question,
+        answers: questions[0].answers,
+        correct: questions[0].correct,
+        currentPlayerId: players[0].id,
+        answered: false
     };
 
-    room.phase =
-        "quiz";
-
-    room.results =
-        null;
+    room.phase = "quiz";
+    room.results = null;
 
     broadcastRoom(room);
 
@@ -882,97 +685,58 @@ function nextQuizQuestion(room) {
         return;
     }
 
-    const players =
-        getConnectedActivePlayers(
-            room
-        );
+    const players = getConnectedActivePlayers(room);
 
     if (!players.length) {
         finishQuiz(room);
         return;
     }
 
-    const number =
-        room.quiz.number + 1;
+    const number = room.quiz.number + 1;
 
-    if (
-        number >
-        room.quizQuestions.length
-    ) {
+    if (number > room.quizQuestions.length) {
         finishQuiz(room);
         return;
     }
 
     const question =
-        room.quizQuestions[
-            number - 1
-        ];
+        room.quizQuestions[number - 1];
 
-    room.quiz.number =
-        number;
-
-    room.quiz.question =
-        question.question;
-
-    room.quiz.answers =
-        question.answers;
-
-    room.quiz.correct =
-        question.correct;
+    room.quiz.number = number;
+    room.quiz.question = question.question;
+    room.quiz.answers = question.answers;
+    room.quiz.correct = question.correct;
 
     room.quiz.currentPlayerId =
-        players[
-            (number - 1) %
-                players.length
-        ].id;
+        players[(number - 1) % players.length].id;
 
-    room.quiz.answered =
-        false;
+    room.quiz.answered = false;
 
     broadcastRoom(room);
 }
 
 function finishQuiz(room) {
     room.results = {
-        category:
-            "quiz",
+        category: "quiz",
+        message: "Die Quizrunde ist beendet.",
 
-        message:
-            "Die Quizrunde ist beendet.",
-
-        players:
-            getActivePlayers(room)
-                .map(player => ({
-                    id:
-                        player.id,
-
-                    name:
-                        player.name,
-
-                    points:
-                        player.roundPoints,
-
-                    score:
-                        player.score
-                }))
-                .sort(
-                    (a, b) =>
-                        b.points -
-                        a.points
-                )
+        players: getActivePlayers(room)
+            .map(player => ({
+                id: player.id,
+                name: player.name,
+                points: player.roundPoints,
+                score: player.score
+            }))
+            .sort((a, b) => b.points - a.points)
     };
 
-    room.phase =
-        "results";
+    room.phase = "results";
 
     broadcastRoom(room);
 }
 
 function startEstimate(room) {
-    const players =
-        getConnectedActivePlayers(
-            room
-        );
+    const players = getConnectedActivePlayers(room);
 
     if (players.length < 2) {
         sendErrorToRoom(
@@ -984,266 +748,148 @@ function startEstimate(room) {
     }
 
     const questions =
-        shuffle(
-            ESTIMATE_QUESTIONS
-        ).slice(
+        shuffle(ESTIMATE_QUESTIONS).slice(
             0,
-            Math.min(
-                5,
-                ESTIMATE_QUESTIONS.length
-            )
+            Math.min(5, ESTIMATE_QUESTIONS.length)
         );
 
-    room.estimateQuestions =
-        questions;
+    room.estimateQuestions = questions;
 
     room.estimate = {
-        round:
-            room.round,
-
-        totalRounds:
-            room.totalRounds,
-
-        number:
-            1,
-
-        totalQuestions:
-            questions.length,
-
-        question:
-            questions[0].question,
-
-        answer:
-            questions[0].answer,
-
-        currentPlayerId:
-            players[0].id,
-
-        answered:
-            false
+        round: room.round,
+        totalRounds: room.totalRounds,
+        number: 1,
+        totalQuestions: questions.length,
+        question: questions[0].question,
+        answer: questions[0].answer,
+        currentPlayerId: players[0].id,
+        answered: false
     };
 
-    room.phase =
-        "estimate";
-
-    room.results =
-        null;
+    room.phase = "estimate";
+    room.results = null;
 
     broadcastRoom(room);
 
     return true;
 }
 
-function nextEstimateQuestion(
-    room
-) {
+function nextEstimateQuestion(room) {
     if (!room.estimate) {
         return;
     }
 
-    const players =
-        getConnectedActivePlayers(
-            room
-        );
+    const players = getConnectedActivePlayers(room);
 
     if (!players.length) {
         finishEstimate(room);
         return;
     }
 
-    const number =
-        room.estimate.number + 1;
+    const number = room.estimate.number + 1;
 
-    if (
-        number >
-        room.estimateQuestions.length
-    ) {
+    if (number > room.estimateQuestions.length) {
         finishEstimate(room);
         return;
     }
 
     const question =
-        room.estimateQuestions[
-            number - 1
-        ];
+        room.estimateQuestions[number - 1];
 
-    room.estimate.number =
-        number;
-
-    room.estimate.question =
-        question.question;
-
-    room.estimate.answer =
-        question.answer;
+    room.estimate.number = number;
+    room.estimate.question = question.question;
+    room.estimate.answer = question.answer;
 
     room.estimate.currentPlayerId =
-        players[
-            (number - 1) %
-                players.length
-        ].id;
+        players[(number - 1) % players.length].id;
 
-    room.estimate.answered =
-        false;
+    room.estimate.answered = false;
 
     broadcastRoom(room);
 }
 
 function finishEstimate(room) {
     room.results = {
-        category:
-            "estimate",
+        category: "estimate",
+        message: "Die Schätzrunde ist beendet.",
 
-        message:
-            "Die Schätzrunde ist beendet.",
-
-        players:
-            getActivePlayers(room)
-                .map(player => ({
-                    id:
-                        player.id,
-
-                    name:
-                        player.name,
-
-                    points:
-                        player.roundPoints,
-
-                    score:
-                        player.score
-                }))
-                .sort(
-                    (a, b) =>
-                        b.points -
-                        a.points
-                )
+        players: getActivePlayers(room)
+            .map(player => ({
+                id: player.id,
+                name: player.name,
+                points: player.roundPoints,
+                score: player.score
+            }))
+            .sort((a, b) => b.points - a.points)
     };
 
-    room.phase =
-        "results";
+    room.phase = "results";
 
     broadcastRoom(room);
 }
 
-function startCategory(
-    room,
-    category
-) {
-    if (
-        category ===
-        "nennen"
-    ) {
-        return startNennen(
-            room
-        );
+function startCategory(room, category) {
+    if (category === "nennen") {
+        return startNennen(room);
     }
 
-    if (
-        category ===
-        "quiz"
-    ) {
-        return startQuiz(
-            room
-        );
+    if (category === "quiz") {
+        return startQuiz(room);
     }
 
-    if (
-        category ===
-        "estimate"
-    ) {
-        return startEstimate(
-            room
-        );
+    if (category === "estimate") {
+        return startEstimate(room);
     }
 
     return false;
 }
 
-function createRoom(
-    player,
-    socket
-) {
-    const code =
-        makeRoomCode();
+function createRoom(player, socket) {
+    const code = makeRoomCode();
 
     const room = {
         code,
 
-        ownerId:
-            player.id,
+        ownerId: player.id,
 
-        players:
-            new Map(),
+        players: new Map(),
 
-        phase:
-            "lobby",
+        phase: "lobby",
 
-        round:
-            1,
+        round: 1,
 
-        totalRounds:
-            3,
+        totalRounds: 3,
 
-        nennen:
-            null,
+        nennen: null,
+        nennenTimer: null,
 
-        nennenTimer:
-            null,
+        quiz: null,
+        quizQuestions: [],
 
-        quiz:
-            null,
+        estimate: null,
+        estimateQuestions: [],
 
-        quizQuestions:
-            [],
-
-        estimate:
-            null,
-
-        estimateQuestions:
-            [],
-
-        results:
-            null
+        results: null
     };
 
-    player.owner =
-        true;
+    player.owner = true;
+    player.score = 0;
+    player.roundPoints = 0;
+    player.roomCode = code;
 
-    player.score =
-        0;
-
-    player.roundPoints =
-        0;
-
-    player.roomCode =
-        code;
-
-    room.players.set(
-        player.id,
-        player
-    );
-
-    rooms.set(
-        code,
-        room
-    );
+    room.players.set(player.id, player);
+    rooms.set(code, room);
 
     send(socket, {
-        type:
-            "roomCreated",
-
+        type: "roomCreated",
         code
     });
 
     broadcastRoom(room);
 }
 
-function joinRoom(
-    player,
-    socket,
-    code
-) {
-    const room =
-        rooms.get(code);
+function joinRoom(player, socket, code) {
+    const room = rooms.get(code);
 
     if (!room) {
         sendError(
@@ -1254,10 +900,7 @@ function joinRoom(
         return;
     }
 
-    if (
-        room.phase !==
-        "lobby"
-    ) {
+    if (room.phase !== "lobby") {
         sendError(
             socket,
             "Dieses Spiel wurde bereits gestartet."
@@ -1266,74 +909,47 @@ function joinRoom(
         return;
     }
 
-    const existing =
-        findPlayerByIdentity(
-            room,
-            player.identityId
-        );
+    const existing = findPlayerByIdentity(
+        room,
+        player.identityId
+    );
 
     if (existing) {
-        existing.name =
-            player.name ||
-            existing.name;
+        existing.name = player.name || existing.name;
 
-        socket.player =
-            existing;
+        socket.player = existing;
+        socket.roomCode = room.code;
 
-        socket.roomCode =
-            room.code;
-
-        existing.connections.add(
-            socket
-        );
+        existing.connections.add(socket);
 
         send(socket, {
-            type:
-                "joinedRoom",
-
-            code:
-                room.code
+            type: "joinedRoom",
+            code: room.code
         });
 
         broadcastRoom(room);
-
         broadcastOnlineCount();
 
         return;
     }
 
     if (player.roomCode) {
-        if (
-            player.roomCode ===
-            code
-        ) {
+        if (player.roomCode === code) {
             const currentRoom =
-                rooms.get(
-                    player.roomCode
-                );
+                rooms.get(player.roomCode);
 
             if (currentRoom) {
-                player.connections.add(
-                    socket
-                );
+                player.connections.add(socket);
 
-                socket.player =
-                    player;
-
-                socket.roomCode =
-                    player.roomCode;
+                socket.player = player;
+                socket.roomCode = player.roomCode;
 
                 send(socket, {
-                    type:
-                        "joinedRoom",
-
-                    code:
-                        currentRoom.code
+                    type: "joinedRoom",
+                    code: currentRoom.code
                 });
 
-                broadcastRoom(
-                    currentRoom
-                );
+                broadcastRoom(currentRoom);
 
                 return;
             }
@@ -1347,10 +963,7 @@ function joinRoom(
         return;
     }
 
-    if (
-        room.players.size >=
-        16
-    ) {
+    if (room.players.size >= 16) {
         sendError(
             socket,
             "Der Raum ist voll."
@@ -1359,85 +972,48 @@ function joinRoom(
         return;
     }
 
-    player.roomCode =
-        room.code;
+    player.roomCode = room.code;
+    player.owner = false;
+    player.score = 0;
+    player.roundPoints = 0;
 
-    player.owner =
-        false;
+    room.players.set(player.id, player);
 
-    player.score =
-        0;
+    socket.player = player;
+    socket.roomCode = room.code;
 
-    player.roundPoints =
-        0;
-
-    room.players.set(
-        player.id,
-        player
-    );
-
-    socket.player =
-        player;
-
-    player.connections.add(
-        socket
-    );
-
-    socket.roomCode =
-        room.code;
+    player.connections.add(socket);
 
     send(socket, {
-        type:
-            "joinedRoom",
-
-        code:
-            room.code
+        type: "joinedRoom",
+        code: room.code
     });
 
     broadcastRoom(room);
 }
 
-function attachSocketToPlayer(
-    player,
-    socket
-) {
-    socket.player =
-        player;
+function attachSocketToPlayer(player, socket) {
+    socket.player = player;
+    socket.roomCode = player.roomCode || null;
 
-    socket.roomCode =
-        player.roomCode ||
-        null;
-
-    player.connections.add(
-        socket
-    );
-
+    player.connections.add(socket);
     clients.add(socket);
 
     send(socket, {
-        type:
-            "identified",
-
-        playerId:
-            player.id
+        type: "identified",
+        playerId: player.id
     });
 
     if (player.roomCode) {
-        const room =
-            rooms.get(
-                player.roomCode
-            );
+        const room = rooms.get(player.roomCode);
 
         if (room) {
             send(socket, {
-                type:
-                    "state",
-
-                state:
-                    publicRoom(
-                        room,
-                        player.id
-                    )
+                type: "state",
+                state: publicRoom(
+                    room,
+                    player.id
+                )
             });
         }
     }
@@ -1445,30 +1021,22 @@ function attachSocketToPlayer(
     broadcastOnlineCount();
 }
 
-function removeSocket(
-    socket
-) {
+function removeSocket(socket) {
     clients.delete(socket);
 
-    const player =
-        socket.player;
+    const player = socket.player;
 
     if (!player) {
         broadcastOnlineCount();
         return;
     }
 
-    player.connections.delete(
-        socket
-    );
+    player.connections.delete(socket);
 
     broadcastOnlineCount();
 
     if (player.roomCode) {
-        const room =
-            rooms.get(
-                player.roomCode
-            );
+        const room = rooms.get(player.roomCode);
 
         if (room) {
             broadcastRoom(room);
@@ -1477,33 +1045,23 @@ function removeSocket(
 }
 
 function leaveRoom(socket) {
-    const player =
-        socket.player;
+    const player = socket.player;
 
-    if (
-        !player ||
-        !player.roomCode
-    ) {
+    if (!player || !player.roomCode) {
         send(socket, {
-            type:
-                "leftRoom"
+            type: "leftRoom"
         });
 
         return;
     }
 
-    const room =
-        rooms.get(
-            player.roomCode
-        );
+    const room = rooms.get(player.roomCode);
 
     if (!room) {
-        player.roomCode =
-            null;
+        player.roomCode = null;
 
         send(socket, {
-            type:
-                "leftRoom"
+            type: "leftRoom"
         });
 
         return;
@@ -1512,74 +1070,45 @@ function leaveRoom(socket) {
     if (player.owner) {
         clearNennenTimer(room);
 
-        for (
-            const other of
-            room.players.values()
-        ) {
-            other.roomCode =
-                null;
+        for (const other of room.players.values()) {
+            other.roomCode = null;
 
-            for (
-                const otherSocket of
-                other.connections
-            ) {
-                send(
-                    otherSocket,
-                    {
-                        type:
-                            "leftRoom"
-                    }
-                );
+            for (const otherSocket of other.connections) {
+                send(otherSocket, {
+                    type: "leftRoom"
+                });
             }
         }
 
-        rooms.delete(
-            room.code
-        );
+        rooms.delete(room.code);
 
         broadcastOnlineCount();
 
         return;
     }
 
-    room.players.delete(
-        player.id
-    );
+    room.players.delete(player.id);
 
-    player.roomCode =
-        null;
-
+    player.roomCode = null;
     player.connections.clear();
 
     send(socket, {
-        type:
-            "leftRoom"
+        type: "leftRoom"
     });
 
-    if (
-        room.players.size ===
-        0
-    ) {
+    if (room.players.size === 0) {
         clearNennenTimer(room);
-
-        rooms.delete(
-            room.code
-        );
+        rooms.delete(room.code);
     } else {
         broadcastRoom(room);
     }
 }
 
-function handleMessage(
-    socket,
-    message
-) {
+function handleMessage(socket, message) {
     let data;
 
     try {
-        data = JSON.parse(
-            message.toString()
-        );
+        data = JSON.parse(message.toString());
     } catch {
         sendError(
             socket,
@@ -1589,17 +1118,12 @@ function handleMessage(
         return;
     }
 
-    if (
-        data.type ===
-        "identify"
-    ) {
-        const identityId =
-            String(
-                data.identityId ||
-                    ""
-            )
-                .trim()
-                .slice(0, 200);
+    if (data.type === "identify") {
+        const identityId = String(
+            data.identityId || ""
+        )
+            .trim()
+            .slice(0, 200);
 
         if (!identityId) {
             sendError(
@@ -1610,51 +1134,30 @@ function handleMessage(
             return;
         }
 
-        let player =
-            null;
+        let player = null;
 
-        for (
-            const room of
-            rooms.values()
-        ) {
-            const found =
-                findPlayerByIdentity(
-                    room,
-                    identityId
-                );
+        for (const room of rooms.values()) {
+            const found = findPlayerByIdentity(
+                room,
+                identityId
+            );
 
             if (found) {
-                player =
-                    found;
-
+                player = found;
                 break;
             }
         }
 
         if (!player) {
             player = {
-                id:
-                    makePlayerId(),
-
+                id: makePlayerId(),
                 identityId,
-
-                name:
-                    "",
-
-                owner:
-                    false,
-
-                roomCode:
-                    null,
-
-                score:
-                    0,
-
-                roundPoints:
-                    0,
-
-                connections:
-                    new Set()
+                name: "",
+                owner: false,
+                roomCode: null,
+                score: 0,
+                roundPoints: 0,
+                connections: new Set()
             };
         }
 
@@ -1675,17 +1178,10 @@ function handleMessage(
         return;
     }
 
-    const player =
-        socket.player;
+    const player = socket.player;
 
-    if (
-        data.type ===
-        "createRoom"
-    ) {
-        const name =
-            cleanName(
-                data.name
-            );
+    if (data.type === "createRoom") {
+        const name = cleanName(data.name);
 
         if (!name) {
             sendError(
@@ -1705,8 +1201,7 @@ function handleMessage(
             return;
         }
 
-        player.name =
-            name;
+        player.name = name;
 
         createRoom(
             player,
@@ -1716,21 +1211,14 @@ function handleMessage(
         return;
     }
 
-    if (
-        data.type ===
-        "joinRoom"
-    ) {
-        const name =
-            cleanName(
-                data.name
-            );
+    if (data.type === "joinRoom") {
+        const name = cleanName(data.name);
 
-        const code =
-            String(
-                data.code || ""
-            )
-                .trim()
-                .toUpperCase();
+        const code = String(
+            data.code || ""
+        )
+            .trim()
+            .toUpperCase();
 
         if (!name) {
             sendError(
@@ -1741,11 +1229,7 @@ function handleMessage(
             return;
         }
 
-        if (
-            !/^[A-Z0-9]{5}$/.test(
-                code
-            )
-        ) {
+        if (!/^[A-Z0-9]{5}$/.test(code)) {
             sendError(
                 socket,
                 "Der Raumcode muss 5 Zeichen haben."
@@ -1754,20 +1238,11 @@ function handleMessage(
             return;
         }
 
-        player.name =
-            name;
+        player.name = name;
 
-        if (
-            player.roomCode
-        ) {
-            if (
-                player.roomCode ===
-                code
-            ) {
-                const room =
-                    rooms.get(
-                        code
-                    );
+        if (player.roomCode) {
+            if (player.roomCode === code) {
+                const room = rooms.get(code);
 
                 if (room) {
                     const existing =
@@ -1777,30 +1252,21 @@ function handleMessage(
                         );
 
                     if (existing) {
-                        existing.name =
-                            name;
+                        existing.name = name;
 
-                        socket.player =
-                            existing;
-
-                        socket.roomCode =
-                            room.code;
+                        socket.player = existing;
+                        socket.roomCode = room.code;
 
                         existing.connections.add(
                             socket
                         );
 
                         send(socket, {
-                            type:
-                                "joinedRoom",
-
-                            code:
-                                room.code
+                            type: "joinedRoom",
+                            code: room.code
                         });
 
-                        broadcastRoom(
-                            room
-                        );
+                        broadcastRoom(room);
 
                         return;
                     }
@@ -1824,14 +1290,10 @@ function handleMessage(
         return;
     }
 
-    if (
-        data.type ===
-        "startGame"
-    ) {
-        const room =
-            rooms.get(
-                player.roomCode
-            );
+    if (data.type === "startGame") {
+        const room = rooms.get(
+            player.roomCode
+        );
 
         if (!room) {
             sendError(
@@ -1842,10 +1304,7 @@ function handleMessage(
             return;
         }
 
-        if (
-            room.ownerId !==
-            player.id
-        ) {
+        if (room.ownerId !== player.id) {
             sendError(
                 socket,
                 "Nur der Besitzer kann das Spiel starten."
@@ -1854,11 +1313,7 @@ function handleMessage(
             return;
         }
 
-        if (
-            getActivePlayers(
-                room
-            ).length < 2
-        ) {
+        if (getActivePlayers(room).length < 2) {
             sendError(
                 socket,
                 "Mindestens 2 Mitspieler werden benötigt."
@@ -1867,24 +1322,13 @@ function handleMessage(
             return;
         }
 
-        room.phase =
-            "category";
+        room.phase = "category";
+        room.round = 1;
+        room.results = null;
 
-        room.round =
-            1;
-
-        room.results =
-            null;
-
-        for (
-            const p of
-            room.players.values()
-        ) {
-            p.score =
-                0;
-
-            p.roundPoints =
-                0;
+        for (const p of room.players.values()) {
+            p.score = 0;
+            p.roundPoints = 0;
         }
 
         broadcastRoom(room);
@@ -1892,14 +1336,10 @@ function handleMessage(
         return;
     }
 
-    if (
-        data.type ===
-        "chooseCategory"
-    ) {
-        const room =
-            rooms.get(
-                player.roomCode
-            );
+    if (data.type === "chooseCategory") {
+        const room = rooms.get(
+            player.roomCode
+        );
 
         if (!room) {
             sendError(
@@ -1910,10 +1350,7 @@ function handleMessage(
             return;
         }
 
-        if (
-            room.ownerId !==
-            player.id
-        ) {
+        if (room.ownerId !== player.id) {
             sendError(
                 socket,
                 "Nur der Besitzer kann die Kategorie auswählen."
@@ -1922,10 +1359,7 @@ function handleMessage(
             return;
         }
 
-        if (
-            room.phase !==
-            "category"
-        ) {
+        if (room.phase !== "category") {
             sendError(
                 socket,
                 "Jetzt kann keine Kategorie gewählt werden."
@@ -1934,20 +1368,16 @@ function handleMessage(
             return;
         }
 
-        const category =
-            String(
-                data.category ||
-                    ""
-            );
+        const category = String(
+            data.category || ""
+        );
 
         if (
             ![
                 "nennen",
                 "quiz",
                 "estimate"
-            ].includes(
-                category
-            )
+            ].includes(category)
         ) {
             sendError(
                 socket,
@@ -1965,27 +1395,21 @@ function handleMessage(
         return;
     }
 
-    if (
-        data.type ===
-        "nennenAnswer"
-    ) {
-        const room =
-            rooms.get(
-                player.roomCode
-            );
+    if (data.type === "nennenAnswer") {
+        const room = rooms.get(
+            player.roomCode
+        );
 
         if (
             !room ||
-            room.phase !==
-                "nennen" ||
+            room.phase !== "nennen" ||
             !room.nennen
         ) {
             return;
         }
 
         if (
-            room.nennen
-                .currentPlayerId !==
+            room.nennen.currentPlayerId !==
             player.id
         ) {
             sendError(
@@ -1996,10 +1420,7 @@ function handleMessage(
             return;
         }
 
-        if (
-            Date.now() >
-            room.nennen.turnEndsAt
-        ) {
+        if (Date.now() > room.nennen.turnEndsAt) {
             endNennenRound(
                 room,
                 `${player.name} hat die Zeit überschritten.`
@@ -2008,11 +1429,9 @@ function handleMessage(
             return;
         }
 
-        const answer =
-            String(
-                data.answer ||
-                    ""
-            ).trim();
+        const answer = String(
+            data.answer || ""
+        ).trim();
 
         if (!answer) {
             sendError(
@@ -2024,15 +1443,12 @@ function handleMessage(
         }
 
         const normalized =
-            normalizeAnswer(
-                answer
-            );
+            normalizeAnswer(answer);
 
         if (
-            room.nennen
-                .usedAnswers.has(
-                    normalized
-                )
+            room.nennen.usedAnswers.has(
+                normalized
+            )
         ) {
             endNennenRound(
                 room,
@@ -2043,9 +1459,9 @@ function handleMessage(
         }
 
         const valid =
-            room.nennen
-                .normalizedAnswers
-                .has(normalized);
+            room.nennen.normalizedAnswers.has(
+                normalized
+            );
 
         if (!valid) {
             endNennenRound(
@@ -2060,14 +1476,12 @@ function handleMessage(
             normalized
         );
 
-        player.roundPoints +=
-            1;
+        player.roundPoints += 1;
 
-        const next =
-            nextActivePlayer(
-                room,
-                player.id
-            );
+        const next = nextActivePlayer(
+            room,
+            player.id
+        );
 
         if (!next) {
             endNennenRound(
@@ -2078,8 +1492,7 @@ function handleMessage(
             return;
         }
 
-        room.nennen
-            .currentPlayerId =
+        room.nennen.currentPlayerId =
             next.id;
 
         room.nennen.turnEndsAt =
@@ -2087,34 +1500,26 @@ function handleMessage(
 
         broadcastRoom(room);
 
-        scheduleNennenTimeout(
-            room
-        );
+        scheduleNennenTimeout(room);
 
         return;
     }
 
-    if (
-        data.type ===
-        "quizAnswer"
-    ) {
-        const room =
-            rooms.get(
-                player.roomCode
-            );
+    if (data.type === "quizAnswer") {
+        const room = rooms.get(
+            player.roomCode
+        );
 
         if (
             !room ||
-            room.phase !==
-                "quiz" ||
+            room.phase !== "quiz" ||
             !room.quiz
         ) {
             return;
         }
 
         if (
-            room.quiz
-                .currentPlayerId !==
+            room.quiz.currentPlayerId !==
             player.id
         ) {
             sendError(
@@ -2125,25 +1530,16 @@ function handleMessage(
             return;
         }
 
-        if (
-            room.quiz.answered
-        ) {
+        if (room.quiz.answered) {
             return;
         }
 
-        const index =
-            Number(
-                data.index
-            );
+        const index = Number(data.index);
 
         if (
-            !Number.isInteger(
-                index
-            ) ||
+            !Number.isInteger(index) ||
             index < 0 ||
-            index >=
-                room.quiz.answers
-                    .length
+            index >= room.quiz.answers.length
         ) {
             sendError(
                 socket,
@@ -2153,29 +1549,21 @@ function handleMessage(
             return;
         }
 
-        room.quiz.answered =
-            true;
+        room.quiz.answered = true;
 
-        if (
-            index ===
-            room.quiz.correct
-        ) {
-            player.roundPoints +=
-                1;
+        if (index === room.quiz.correct) {
+            player.roundPoints += 1;
         }
 
         broadcastRoom(room);
 
         setTimeout(() => {
             const currentRoom =
-                rooms.get(
-                    room.code
-                );
+                rooms.get(room.code);
 
             if (
                 currentRoom &&
-                currentRoom.phase ===
-                    "quiz" &&
+                currentRoom.phase === "quiz" &&
                 currentRoom.quiz &&
                 currentRoom.quiz.answered
             ) {
@@ -2188,27 +1576,21 @@ function handleMessage(
         return;
     }
 
-    if (
-        data.type ===
-        "estimateAnswer"
-    ) {
-        const room =
-            rooms.get(
-                player.roomCode
-            );
+    if (data.type === "estimateAnswer") {
+        const room = rooms.get(
+            player.roomCode
+        );
 
         if (
             !room ||
-            room.phase !==
-                "estimate" ||
+            room.phase !== "estimate" ||
             !room.estimate
         ) {
             return;
         }
 
         if (
-            room.estimate
-                .currentPlayerId !==
+            room.estimate.currentPlayerId !==
             player.id
         ) {
             sendError(
@@ -2219,29 +1601,16 @@ function handleMessage(
             return;
         }
 
-        if (
-            room.estimate
-                .answered
-        ) {
+        if (room.estimate.answered) {
             return;
         }
 
-        const value =
-            Number(
-                String(
-                    data.answer ||
-                        ""
-                ).replace(
-                    ",",
-                    "."
-                )
-            );
+        const value = Number(
+            String(data.answer || "")
+                .replace(",", ".")
+        );
 
-        if (
-            !Number.isFinite(
-                value
-            )
-        ) {
+        if (!Number.isFinite(value)) {
             sendError(
                 socket,
                 "Bitte gib eine Zahl ein."
@@ -2250,58 +1619,42 @@ function handleMessage(
             return;
         }
 
-        room.estimate
-            .answered =
-            true;
+        room.estimate.answered = true;
 
         const correct =
             room.estimate.answer;
 
-        const distance =
-            Math.abs(
-                value - correct
-            );
+        const distance = Math.abs(
+            value - correct
+        );
 
-        let points =
-            0;
+        let points = 0;
 
-        if (
-            distance === 0
-        ) {
+        if (distance === 0) {
             points = 3;
         } else if (
             distance <=
-            Math.max(
-                1,
-                correct * 0.05
-            )
+            Math.max(1, correct * 0.05)
         ) {
             points = 2;
         } else if (
             distance <=
-            Math.max(
-                2,
-                correct * 0.15
-            )
+            Math.max(2, correct * 0.15)
         ) {
             points = 1;
         }
 
-        player.roundPoints +=
-            points;
+        player.roundPoints += points;
 
         broadcastRoom(room);
 
         setTimeout(() => {
             const currentRoom =
-                rooms.get(
-                    room.code
-                );
+                rooms.get(room.code);
 
             if (
                 currentRoom &&
-                currentRoom.phase ===
-                    "estimate" &&
+                currentRoom.phase === "estimate" &&
                 currentRoom.estimate &&
                 currentRoom.estimate.answered
             ) {
@@ -2314,23 +1667,16 @@ function handleMessage(
         return;
     }
 
-    if (
-        data.type ===
-        "continueRound"
-    ) {
-        const room =
-            rooms.get(
-                player.roomCode
-            );
+    if (data.type === "continueRound") {
+        const room = rooms.get(
+            player.roomCode
+        );
 
         if (!room) {
             return;
         }
 
-        if (
-            room.ownerId !==
-            player.id
-        ) {
+        if (room.ownerId !== player.id) {
             sendError(
                 socket,
                 "Nur der Besitzer kann fortfahren."
@@ -2339,233 +1685,168 @@ function handleMessage(
             return;
         }
 
-        if (
-            room.phase !==
-            "results"
-        ) {
+        if (room.phase !== "results") {
             return;
         }
 
-        for (
-            const p of
-            getActivePlayers(room)
-        ) {
-            p.score +=
-                p.roundPoints;
-
-            p.roundPoints =
-                0;
+        for (const p of getActivePlayers(room)) {
+            p.score += p.roundPoints;
+            p.roundPoints = 0;
         }
 
-        if (
-            room.round >=
-            room.totalRounds
-        ) {
-            room.phase =
-                "final";
+        if (room.round >= room.totalRounds) {
+            room.phase = "final";
 
             broadcastRoom(room);
 
             return;
         }
 
-        room.round +=
-            1;
+        room.round += 1;
 
-        room.phase =
-            "category";
+        room.phase = "category";
 
-        room.nennen =
-            null;
-
-        room.quiz =
-            null;
-
-        room.estimate =
-            null;
-
-        room.results =
-            null;
+        room.nennen = null;
+        room.quiz = null;
+        room.estimate = null;
+        room.results = null;
 
         broadcastRoom(room);
 
         return;
     }
 
-    if (
-        data.type ===
-        "leaveRoom"
-    ) {
+    if (data.type === "leaveRoom") {
         leaveRoom(socket);
         return;
     }
 }
 
-const server =
-    http.createServer(
-        (req, res) => {
-            let requested;
+const server = http.createServer(
+    (req, res) => {
+        let requested;
 
-            try {
-                requested =
-                    decodeURIComponent(
-                        String(
-                            req.url ||
-                                "/"
-                        ).split(
-                            "?"
-                        )[0]
-                    );
-            } catch {
-                res.writeHead(
-                    400
-                );
+        try {
+            requested = decodeURIComponent(
+                String(req.url || "/").split("?")[0]
+            );
+        } catch {
+            res.writeHead(400);
+            res.end("Bad Request");
+            return;
+        }
 
-                res.end(
-                    "Bad Request"
-                );
+        if (requested === "/") {
+            requested = "/index.html";
+        }
 
-                return;
-            }
+        requested = requested.replace(
+            /^[/\\]+/,
+            ""
+        );
 
-            if (
-                requested ===
-                "/"
-            ) {
-                requested =
-                    "/index.html";
-            }
+        const filePath = path.resolve(
+            __dirname,
+            requested
+        );
 
-            requested =
-                requested.replace(
-                    /^[/\\]+/,
-                    ""
-                );
+        const rootPath = path.resolve(
+            __dirname
+        );
 
-            const filePath =
-                path.resolve(
-                    __dirname,
-                    requested
-                );
+        if (
+            filePath !== rootPath &&
+            !filePath.startsWith(
+                rootPath + path.sep
+            )
+        ) {
+            res.writeHead(403);
+            res.end("Forbidden");
+            return;
+        }
 
-            const rootPath =
-                path.resolve(
-                    __dirname
-                );
-
-            if (
-                filePath !==
-                    rootPath &&
-                !filePath.startsWith(
-                    rootPath +
-                        path.sep
-                )
-            ) {
-                res.writeHead(
-                    403
-                );
-
-                res.end(
-                    "Forbidden"
-                );
-
-                return;
-            }
-
-            fs.readFile(
-                filePath,
-                (
-                    error,
-                    data
-                ) => {
-                    if (error) {
-                        res.writeHead(
-                            404,
-                            {
-                                "Content-Type":
-                                    "text/plain; charset=utf-8"
-                            }
-                        );
-
-                        res.end(
-                            "404 - Datei nicht gefunden"
-                        );
-
-                        return;
-                    }
-
-                    const extension =
-                        path
-                            .extname(
-                                filePath
-                            )
-                            .toLowerCase();
-
-                    const contentTypes =
-                        {
-                            ".html":
-                                "text/html; charset=utf-8",
-
-                            ".css":
-                                "text/css; charset=utf-8",
-
-                            ".js":
-                                "application/javascript; charset=utf-8",
-
-                            ".json":
-                                "application/json; charset=utf-8",
-
-                            ".png":
-                                "image/png",
-
-                            ".jpg":
-                                "image/jpeg",
-
-                            ".jpeg":
-                                "image/jpeg",
-
-                            ".gif":
-                                "image/gif",
-
-                            ".svg":
-                                "image/svg+xml",
-
-                            ".ico":
-                                "image/x-icon"
-                        };
-
+        fs.readFile(
+            filePath,
+            (error, data) => {
+                if (error) {
                     res.writeHead(
-                        200,
+                        404,
                         {
                             "Content-Type":
-                                contentTypes[
-                                    extension
-                                ] ||
-                                "application/octet-stream",
-
-                            "Cache-Control":
-                                "no-store, no-cache, must-revalidate, proxy-revalidate",
-
-                            Pragma:
-                                "no-cache",
-
-                            Expires:
-                                "0"
+                                "text/plain; charset=utf-8"
                         }
                     );
 
                     res.end(
-                        data
+                        "404 - Datei nicht gefunden"
                     );
-                }
-            );
-        }
-    );
 
-const wss =
-    new WebSocket.Server({
-        server
-    });
+                    return;
+                }
+
+                const extension =
+                    path.extname(filePath)
+                        .toLowerCase();
+
+                const contentTypes = {
+                    ".html":
+                        "text/html; charset=utf-8",
+
+                    ".css":
+                        "text/css; charset=utf-8",
+
+                    ".js":
+                        "application/javascript; charset=utf-8",
+
+                    ".json":
+                        "application/json; charset=utf-8",
+
+                    ".png":
+                        "image/png",
+
+                    ".jpg":
+                        "image/jpeg",
+
+                    ".jpeg":
+                        "image/jpeg",
+
+                    ".gif":
+                        "image/gif",
+
+                    ".svg":
+                        "image/svg+xml",
+
+                    ".ico":
+                        "image/x-icon"
+                };
+
+                res.writeHead(
+                    200,
+                    {
+                        "Content-Type":
+                            contentTypes[
+                                extension
+                            ] ||
+                            "application/octet-stream",
+
+                        "Cache-Control":
+                            "no-store, no-cache, must-revalidate, proxy-revalidate",
+
+                        Pragma: "no-cache",
+
+                        Expires: "0"
+                    }
+                );
+
+                res.end(data);
+            }
+        );
+    }
+);
+
+const wss = new WebSocket.Server({
+    server
+});
 
 wss.on(
     "connection",
@@ -2585,18 +1866,14 @@ wss.on(
         socket.on(
             "close",
             () => {
-                removeSocket(
-                    socket
-                );
+                removeSocket(socket);
             }
         );
 
         socket.on(
             "error",
             () => {
-                removeSocket(
-                    socket
-                );
+                removeSocket(socket);
             }
         );
 
@@ -2620,10 +1897,13 @@ server.listen(
         );
         console.log("");
         console.log(
-            `Website: http://localhost:${PORT}`
+            `Server läuft auf Port ${PORT}`
         );
         console.log(
-            `Server:  ws://localhost:${PORT}`
+            `HTTP: http://localhost:${PORT}`
+        );
+        console.log(
+            `WebSocket: ws://localhost:${PORT}`
         );
         console.log("");
         console.log(
@@ -2632,3 +1912,4 @@ server.listen(
         console.log("");
     }
 );
+
