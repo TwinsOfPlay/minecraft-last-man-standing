@@ -1,76 +1,70 @@
+
 const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 const WebSocket = require("ws");
 
+/* =========================================================
+   SERVER
+========================================================= */
+
 const HOST = "0.0.0.0";
 const PORT = Number(process.env.PORT) || 5500;
 
-const TOTAL_ROUNDS = 3;
 const MAX_PLAYERS = 16;
-const NENNEN_TIME = 30;
+const TOTAL_ROUNDS = 3;
+const NENNEN_TIME_MS = 30_000;
 
 const rooms = new Map();
 const clients = new Set();
-
 const playersById = new Map();
 const playersByIdentity = new Map();
 
 /* =========================================================
    FRAGEN
-   ========================================================= */
+========================================================= */
 
 const quizQuestions = [
     {
-        question: "Wie viele Herzen hat ein Spieler in Minecraft?",
-        answers: [
-            "5",
-            "10",
-            "20",
-            "40"
-        ],
+        question: "Wie viele Herzen hat ein Minecraft-Spieler standardmäßig?",
+        answers: ["5", "10", "20", "40"],
         correct: 1
     },
     {
-        question: "Welches Erz ist am seltensten in der normalen Oberwelt?",
-        answers: [
-            "Kohle",
-            "Eisen",
-            "Diamant",
-            "Gold"
-        ],
+        question: "Welcher Mob explodiert, wenn er dem Spieler zu nahe kommt?",
+        answers: ["Zombie", "Skelett", "Creeper", "Spinne"],
         correct: 2
     },
     {
-        question: "Wie heißt die Dimension mit den Endermen?",
-        answers: [
-            "Nether",
-            "End",
-            "Aether",
-            "Deep Dark"
-        ],
+        question: "Wie viele Diamanten benötigt man für eine vollständige Diamantrüstung?",
+        answers: ["18", "24", "27", "32"],
         correct: 1
     },
     {
-        question: "Wie viele Obsidianblöcke benötigt ein normales Netherportal mindestens?",
-        answers: [
-            "8",
-            "10",
-            "12",
-            "14"
-        ],
+        question: "Welche Dimension wird durch ein Netherportal erreicht?",
+        answers: ["End", "Nether", "Aether", "Deep Dark"],
         correct: 1
     },
     {
-        question: "Welcher Mob explodiert?",
-        answers: [
-            "Zombie",
-            "Skelett",
-            "Creeper",
-            "Spinne"
-        ],
+        question: "Wie viele Bücherregale braucht man für die maximale Verzauberungsstufe?",
+        answers: ["10", "12", "15", "18"],
         correct: 2
+    },
+    {
+        question: "Was braucht man, um einen Beacon zu craften?",
+        answers: ["Netherstern", "Enderperle", "Diamant", "Schleimball"],
+        correct: 0
+    },
+    {
+        question: "Welches Erz ist für Diamantrüstung notwendig?",
+        answers: ["Eisen", "Gold", "Diamant", "Kupfer"],
+        correct: 2
+    },
+    {
+        question: "Wie viele Slots besitzt eine große Truhe?",
+        answers: ["27", "36", "45", "54"],
+        correct: 3
     },
     {
         question: "Welches Item benötigt man, um ein Endportal zu aktivieren?",
@@ -83,121 +77,281 @@ const quizQuestions = [
         correct: 1
     },
     {
-        question: "Wie viele Diamanten benötigt man für eine vollständige Diamantrüstung?",
-        answers: [
-            "18",
-            "24",
-            "27",
-            "32"
-        ],
-        correct: 1
-    },
-    {
         question: "Was droppt ein Creeper normalerweise?",
         answers: [
-            "Pfeile",
-            "Schießpulver",
             "Knochen",
-            "Fäden"
+            "Schießpulver",
+            "Fäden",
+            "Pfeile"
         ],
         correct: 1
     },
     {
-        question: "Welcher Block kann einen Leuchtturm aktivieren?",
+        question: "Welches Tool verwendet man normalerweise, um Stein abzubauen?",
         answers: [
-            "Stein",
-            "Eisenblock",
-            "Erde",
-            "Sandstein"
+            "Axt",
+            "Schaufel",
+            "Spitzhacke",
+            "Hacke"
         ],
-        correct: 1
+        correct: 2
     },
     {
-        question: "Wie viele Bücherregale braucht ein Verzauberungstisch für maximale Verzauberungen?",
-        answers: [
-            "10",
-            "12",
-            "15",
-            "18"
-        ],
+        question: "Wie weit kann sich Wasser von einer Quelle horizontal ausbreiten?",
+        answers: ["4", "5", "7", "9"],
         correct: 2
     }
 ];
 
 const estimateQuestions = [
     {
-        question: "Wie hoch ist ein normaler Spieler-Sprung in Blöcken?",
-        answer: 1.25
-    },
-    {
-        question: "Wie viele Blöcke kann Wasser sich in der Oberwelt horizontal ausbreiten?",
-        answer: 7
-    },
-    {
-        question: "Wie viele Herzen hat ein normaler Creeper?",
+        question: "Wie viele Herzen hat ein Creeper?",
         answer: 10
     },
     {
-        question: "Wie viele Slots hat eine normale große Truhe?",
+        question: "Wie viele Slots hat eine große Truhe?",
         answer: 54
     },
     {
-        question: "Wie viele Obsidianblöcke hat ein Netherportal mindestens?",
+        question: "Wie viele Bücherregale werden für Level-30-Verzauberungen benötigt?",
+        answer: 15
+    },
+    {
+        question: "Wie weit kann Wasser von einer Quelle fließen?",
+        answer: 7
+    },
+    {
+        question: "Wie viele Enderaugen werden maximal für ein Endportal benötigt?",
+        answer: 12
+    },
+    {
+        question: "Wie viele Slots hat die Hotbar?",
+        answer: 9
+    },
+    {
+        question: "Wie viele Herzen hat ein Zombie?",
         answer: 10
     },
     {
-        question: "Wie viele Enderperlen benötigt man maximal für ein Eye of Ender?",
-        answer: 1
+        question: "Wie hoch ist ein Minecraft-Spieler ungefähr?",
+        answer: 2
     },
     {
-        question: "Wie viele Erfahrungspunkte bekommt man ungefähr für das Töten eines normalen Zombies?",
-        answer: 5
-    },
-    {
-        question: "Wie viele Blöcke ist ein Stack maximal?",
+        question: "Wie viele Items passen normalerweise in einen Stack?",
         answer: 64
     },
     {
         question: "Wie viele Minuten dauert ein kompletter Minecraft-Tag?",
         answer: 20
-    },
-    {
-        question: "Wie viele Slots besitzt ein normales Inventar ohne Hotbar?",
-        answer: 27
     }
 ];
 
-const nennenWords = [
-    "Baum",
-    "Stein",
-    "Eisen",
-    "Diamant",
-    "Zombie",
-    "Creeper",
-    "Dorf",
-    "Nether",
-    "Enderdrache",
-    "Schaf",
-    "Kuh",
-    "Schwein",
-    "Bogen",
-    "Schwert",
-    "Spitzhacke",
-    "Fackel",
-    "Ofen",
-    "Truhe",
-    "Crafting Table",
-    "Redstone",
-    "Gold",
-    "Obsidian",
-    "Sand",
-    "Glas",
-    "Wasser"
+const nennenPrompts = [
+    "Nenne etwas aus Minecraft.",
+    "Nenne einen Minecraft-Mob.",
+    "Nenne einen Minecraft-Block.",
+    "Nenne ein Minecraft-Item.",
+    "Nenne ein Werkzeug aus Minecraft.",
+    "Nenne eine Minecraft-Waffe.",
+    "Nenne ein Minecraft-Erz.",
+    "Nenne etwas, das man craften kann.",
+    "Nenne etwas aus dem Nether.",
+    "Nenne etwas aus dem End."
 ];
+
+const nennenCategories = {
+    mob: [
+        "zombie",
+        "skelett",
+        "creeper",
+        "spinne",
+        "enderman",
+        "kuh",
+        "schwein",
+        "schaf",
+        "huhn",
+        "dorfbewohner",
+        "dörfler",
+        "hexe",
+        "eisengolem",
+        "schneegolem",
+        "enderdrache",
+        "wither",
+        "slime",
+        "magma cube",
+        "phantom",
+        "ghast",
+        "blaze",
+        "piglin",
+        "zombifizierter piglin",
+        "zombie piglin",
+        "hoglin",
+        "shulker",
+        "silverfish",
+        "fledermaus",
+        "fuchs",
+        "wolf",
+        "katze",
+        "pferd",
+        "esel",
+        "maultier",
+        "papagei",
+        "tintenfisch",
+        "delfin",
+        "axolotl",
+        "ziege",
+        "frosch",
+        "kaulquappe"
+    ],
+
+    block: [
+        "grasblock",
+        "gras",
+        "erde",
+        "stein",
+        "andesit",
+        "diorit",
+        "granit",
+        "obsidian",
+        "sand",
+        "roter sand",
+        "kies",
+        "glas",
+        "holz",
+        "eichenholz",
+        "fichtenholz",
+        "birkenholz",
+        "dschungelholz",
+        "akazienholz",
+        "mangrovenholz",
+        "kirschholz",
+        "wolle",
+        "tnt",
+        "fackel",
+        "leuchtfeuer",
+        "ziegel",
+        "terracotta",
+        "schwarzstein",
+        "netherrack",
+        "endstein"
+    ],
+
+    item: [
+        "diamant",
+        "eisenbarren",
+        "goldbarren",
+        "netheritbarren",
+        "stock",
+        "apfel",
+        "brot",
+        "karotte",
+        "kartoffel",
+        "weizen",
+        "enderperle",
+        "enderauge",
+        "feuerzeug",
+        "eimer",
+        "sattel",
+        "angel",
+        "buch",
+        "leder",
+        "faden",
+        "schießpulver",
+        "knochen",
+        "pfeil",
+        "samen",
+        "smaragd",
+        "redstone",
+        "lapislazuli",
+        "amethystsplitter"
+    ],
+
+    tool: [
+        "spitzhacke",
+        "axt",
+        "schaufel",
+        "hacke",
+        "angel",
+        "feuerzeug",
+        "schere"
+    ],
+
+    weapon: [
+        "schwert",
+        "bogen",
+        "armbrust",
+        "dreizack"
+    ],
+
+    ore: [
+        "kohleerz",
+        "eisenerz",
+        "golderz",
+        "kupfererz",
+        "redstoneerz",
+        "lapislazulierz",
+        "diamantenerz",
+        "smaragderz",
+        "nethergolderz",
+        "antiker schrott"
+    ],
+
+    nether: [
+        "netherrack",
+        "seelensand",
+        "seelenerde",
+        "basalt",
+        "schwarzstein",
+        "netherziegel",
+        "quarz",
+        "netherquarzerz",
+        "blaze",
+        "ghast",
+        "piglin",
+        "hoglin",
+        "bastion",
+        "netherfestung",
+        "lava"
+    ],
+
+    end: [
+        "enderdrache",
+        "enderman",
+        "endstein",
+        "obsidian",
+        "choruspflanze",
+        "chorusfrucht",
+        "shulker",
+        "endstadt",
+        "enderperle",
+        "enderauge"
+    ],
+
+    craft: [
+        "fackel",
+        "werkbank",
+        "ofen",
+        "truhe",
+        "schwert",
+        "spitzhacke",
+        "axt",
+        "schaufel",
+        "hacke",
+        "bogen",
+        "eimer",
+        "schild",
+        "bett",
+        "amboss",
+        "verzauberungstisch",
+        "braustand",
+        "schmelzofen",
+        "räucherofen"
+    ]
+};
 
 /* =========================================================
    HILFSFUNKTIONEN
-   ========================================================= */
+========================================================= */
 
 function randomId() {
     return crypto.randomUUID();
@@ -205,14 +359,17 @@ function randomId() {
 
 function randomRoomCode() {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-
     let code = "";
 
     do {
         code = "";
 
         for (let i = 0; i < 5; i++) {
-            code += chars[Math.floor(Math.random() * chars.length)];
+            code += chars[
+                Math.floor(
+                    Math.random() * chars.length
+                )
+            ];
         }
     } while (rooms.has(code));
 
@@ -220,35 +377,43 @@ function randomRoomCode() {
 }
 
 function shuffle(array) {
-    const arr = [...array];
+    const copy = [...array];
 
-    for (let i = arr.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
+    for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(
+            Math.random() * (i + 1)
+        );
 
-        [arr[i], arr[j]] = [arr[j], arr[i]];
+        [copy[i], copy[j]] = [
+            copy[j],
+            copy[i]
+        ];
     }
 
-    return arr;
+    return copy;
 }
 
-function clamp(value, min, max) {
-    return Math.max(min, Math.min(max, value));
+function normalize(value) {
+    return String(value ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
 }
 
 function safeName(name) {
-    return String(name || "Spieler")
+    const cleaned = String(name ?? "")
         .trim()
         .replace(/[<>]/g, "")
-        .slice(0, 20) || "Spieler";
+        .replace(/\s+/g, " ")
+        .slice(0, 20);
+
+    return cleaned || "Spieler";
 }
 
-/*
-    Regel:
-    - Normale Spieler sind aktiv.
-    - Der Besitzer ist nur aktiv, wenn playing === true.
-*/
 function isPlayerActive(player) {
-    if (!player) return false;
+    if (!player) {
+        return false;
+    }
 
     if (!player.owner) {
         return true;
@@ -257,46 +422,83 @@ function isPlayerActive(player) {
     return player.playing === true;
 }
 
-function getActivePlayers(room) {
-    return room.players.filter(player => isPlayerActive(player));
+function isConnected(player) {
+    return Boolean(
+        player &&
+        player.connections &&
+        player.connections.size > 0
+    );
 }
 
-function getConnectedActivePlayers(room) {
-    return getActivePlayers(room).filter(
-        player => player.connections.size > 0
+function getActivePlayers(room) {
+    return room.players.filter(
+        player =>
+            isPlayerActive(player) &&
+            isConnected(player)
+    );
+}
+
+function getAllActivePlayers(room) {
+    return room.players.filter(
+        player => isPlayerActive(player)
     );
 }
 
 function getPlayerBySocket(socket) {
-    return socket.playerId
-        ? playersById.get(socket.playerId) || null
-        : null;
+    if (!socket?.playerId) {
+        return null;
+    }
+
+    return (
+        playersById.get(
+            socket.playerId
+        ) || null
+    );
 }
 
-function getRoomOfPlayer(player) {
-    if (!player?.roomCode) return null;
+function getRoom(player) {
+    if (!player?.roomCode) {
+        return null;
+    }
 
-    return rooms.get(player.roomCode) || null;
+    return (
+        rooms.get(
+            player.roomCode
+        ) || null
+    );
 }
-
-/* =========================================================
-   BROADCAST
-   ========================================================= */
 
 function send(socket, payload) {
-    if (!socket) return;
-
-    if (socket.readyState !== WebSocket.OPEN) return;
+    if (
+        !socket ||
+        socket.readyState !== WebSocket.OPEN
+    ) {
+        return;
+    }
 
     try {
-        socket.send(JSON.stringify(payload));
+        socket.send(
+            JSON.stringify(payload)
+        );
     } catch (error) {
-        console.error("Sendefehler:", error);
+        console.error(
+            "WebSocket-Sendefehler:",
+            error.message
+        );
     }
 }
 
+function sendError(socket, message) {
+    send(socket, {
+        type: "error",
+        message: String(message)
+    });
+}
+
 function broadcast(room, payload) {
-    if (!room) return;
+    if (!room) {
+        return;
+    }
 
     for (const player of room.players) {
         for (const socket of player.connections) {
@@ -305,441 +507,1020 @@ function broadcast(room, payload) {
     }
 }
 
-function sendError(socket, message) {
-    send(socket, {
-        type: "error",
-        message
-    });
+/* =========================================================
+   ONLINE-ZÄHLER
+========================================================= */
+
+function getOnlineCount() {
+    let count = 0;
+
+    for (const socket of clients) {
+        if (
+            socket.readyState ===
+            WebSocket.OPEN
+        ) {
+            count++;
+        }
+    }
+
+    return count;
+}
+
+function broadcastOnlineCount() {
+    const count =
+        getOnlineCount();
+
+    for (const socket of clients) {
+        if (
+            socket.readyState ===
+            WebSocket.OPEN
+        ) {
+            send(socket, {
+                type: "onlineCount",
+                count
+            });
+        }
+    }
 }
 
 /* =========================================================
-   ROOM STATE
-   ========================================================= */
+   TIMER
+========================================================= */
+
+function clearTimers(room) {
+    if (!room) {
+        return;
+    }
+
+    if (room.nennenTimer) {
+        clearTimeout(
+            room.nennenTimer
+        );
+
+        room.nennenTimer = null;
+    }
+}
+
+/* =========================================================
+   PLAYER STATE
+========================================================= */
 
 function serializePlayer(player) {
     return {
         id: player.id,
         name: player.name,
-        owner: player.owner,
-        playing: player.owner ? player.playing === true : true,
-        connected: player.connections.size > 0,
-        score: player.score || 0
+        owner: player.owner === true,
+        playing: player.owner
+            ? player.playing === true
+            : true,
+        connected: isConnected(player),
+        score: Number(
+            player.score || 0
+        )
     };
-}
-
-function buildRoomState(room) {
-    return {
-        type: "state",
-        phase: room.phase,
-        roomCode: room.code,
-        ownerId: room.ownerId,
-        category: room.category,
-        round: room.round,
-        totalRounds: room.totalRounds,
-        players: room.players.map(serializePlayer),
-
-        game: {
-            word: room.game?.word || null,
-            currentPlayerId: room.game?.currentPlayerId || null,
-            currentPlayerName: room.game?.currentPlayerName || null,
-            timeLeft: room.game?.timeLeft ?? null,
-
-            question: room.game?.question || null,
-            answers: room.game?.answers || null,
-            questionNumber: room.game?.questionNumber || null,
-            totalQuestions: room.game?.totalQuestions || null,
-
-            estimateQuestion:
-                room.game?.estimateQuestion || null,
-
-            submitted:
-                room.game?.submitted || {}
-        },
-
-        results: room.results || [],
-        winner: room.winner || null
-    };
-}
-
-function broadcastState(room) {
-    broadcast(room, buildRoomState(room));
 }
 
 /* =========================================================
-   ROOM LIFECYCLE
-   ========================================================= */
+   GAME STATE
+========================================================= */
 
-function createRoom(ownerPlayer) {
+function buildNennenState(room, viewer) {
+    const game = room.game;
+
+    if (!game) {
+        return null;
+    }
+
+    return {
+        round: room.round,
+        totalRounds: TOTAL_ROUNDS,
+
+        title: "Nennen",
+
+        description:
+            game.prompt ||
+            "Nenne einen passenden Begriff.",
+
+        currentPlayerId:
+            game.currentPlayerId,
+
+        turnEndsAt:
+            game.turnEndsAt,
+
+        usedAnswers:
+            [...game.usedAnswers],
+
+        isOwner:
+            viewer?.id === room.ownerId
+    };
+}
+
+function buildQuizState(room, viewer) {
+    const game = room.game;
+
+    if (!game) {
+        return null;
+    }
+
+    const answered =
+        Boolean(
+            game.answered[
+                viewer?.id
+            ]
+        );
+
+    const isOwner =
+        viewer?.id === room.ownerId;
+
+    return {
+        round: room.round,
+        totalRounds: TOTAL_ROUNDS,
+
+        number:
+            game.questionIndex + 1,
+
+        totalQuestions:
+            game.questions.length,
+
+        question:
+            game.current.question,
+
+        answers:
+            game.current.answers,
+
+        currentPlayerId:
+            game.currentPlayerId,
+
+        answered,
+
+        correct:
+            isOwner &&
+            room.ownerPlaying === false
+                ? game.current.correct
+                : undefined
+    };
+}
+
+function buildEstimateState(
+    room,
+    viewer
+) {
+    const game = room.game;
+
+    if (!game) {
+        return null;
+    }
+
+    const answered =
+        Boolean(
+            game.answered[
+                viewer?.id
+            ]
+        );
+
+    const isOwner =
+        viewer?.id === room.ownerId;
+
+    return {
+        round: room.round,
+        totalRounds: TOTAL_ROUNDS,
+
+        number:
+            game.questionIndex + 1,
+
+        totalQuestions:
+            game.questions.length,
+
+        question:
+            game.current.question,
+
+        currentPlayerId:
+            game.currentPlayerId,
+
+        answered,
+
+        answer:
+            isOwner &&
+            room.ownerPlaying === false
+                ? game.current.answer
+                : undefined
+    };
+}
+
+function buildResultsState(room) {
+    const players =
+        getAllActivePlayers(room)
+            .map(player => ({
+                id: player.id,
+                name: player.name,
+
+                points:
+                    Number(
+                        player.lastRoundPoints ||
+                        0
+                    ),
+
+                score:
+                    Number(
+                        player.score || 0
+                    ),
+
+                total:
+                    Number(
+                        player.score || 0
+                    )
+            }))
+            .sort(
+                (a, b) =>
+                    b.score -
+                    a.score
+            );
+
+    return {
+        message:
+            room.resultsMessage ||
+            (
+                room.round >=
+                TOTAL_ROUNDS
+                    ? "Alle Runden wurden gespielt."
+                    : `Runde ${room.round} beendet.`
+            ),
+
+        players
+    };
+}
+
+function buildFinalState(room) {
+    const players =
+        getAllActivePlayers(room)
+            .map(player => ({
+                id: player.id,
+                name: player.name,
+                score:
+                    Number(
+                        player.score || 0
+                    ),
+                total:
+                    Number(
+                        player.score || 0
+                    )
+            }))
+            .sort(
+                (a, b) =>
+                    b.score -
+                    a.score
+            );
+
+    return {
+        winner:
+            players[0] || null,
+
+        players
+    };
+}
+
+function buildState(
+    room,
+    viewer
+) {
+    const isOwner =
+        viewer?.id === room.ownerId;
+
+    return {
+        code:
+            room.code,
+
+        phase:
+            room.phase,
+
+        category:
+            room.category,
+
+        round:
+            room.round,
+
+        totalRounds:
+            TOTAL_ROUNDS,
+
+        myPlayerId:
+            viewer?.id || null,
+
+        isOwner,
+
+        ownerPlaying:
+            room.ownerPlaying === true,
+
+        players:
+            room.players.map(
+                serializePlayer
+            ),
+
+        nennen:
+            room.phase === "nennen"
+                ? buildNennenState(
+                      room,
+                      viewer
+                  )
+                : null,
+
+        quiz:
+            room.phase === "quiz"
+                ? buildQuizState(
+                      room,
+                      viewer
+                  )
+                : null,
+
+        estimate:
+            room.phase === "estimate"
+                ? buildEstimateState(
+                      room,
+                      viewer
+                  )
+                : null,
+
+        results:
+            room.phase === "results"
+                ? buildResultsState(
+                      room
+                  )
+                : null,
+
+        final:
+            room.phase === "final"
+                ? buildFinalState(
+                      room
+                  )
+                : null
+    };
+}
+
+function sendStateToRoom(room) {
+    if (!room) {
+        return;
+    }
+
+    for (const player of room.players) {
+        for (const socket of player.connections) {
+            send(socket, {
+                type: "state",
+                state:
+                    buildState(
+                        room,
+                        player
+                    )
+            });
+        }
+    }
+}
+
+/* =========================================================
+   ROOM
+========================================================= */
+
+function createRoom(player) {
+    const code =
+        randomRoomCode();
+
     const room = {
-        code: randomRoomCode(),
+        code,
 
-        ownerId: ownerPlayer.id,
+        ownerId:
+            player.id,
+
+        ownerPlaying:
+            true,
 
         players: [],
 
-        phase: "lobby",
+        phase:
+            "lobby",
 
-        category: null,
+        category:
+            null,
 
-        round: 0,
+        round:
+            0,
 
-        totalRounds: TOTAL_ROUNDS,
+        game:
+            null,
 
-        game: null,
+        nennenTimer:
+            null,
 
-        results: [],
+        resultsMessage:
+            "",
 
-        winner: null,
-
-        timer: null,
-
-        turnTimer: null
+        finalMessage:
+            ""
     };
 
-    ownerPlayer.owner = true;
-    ownerPlayer.playing = true;
-    ownerPlayer.roomCode = room.code;
-    ownerPlayer.score = 0;
+    player.roomCode =
+        room.code;
 
-    room.players.push(ownerPlayer);
+    player.owner =
+        true;
 
-    rooms.set(room.code, room);
+    player.playing =
+        true;
+
+    player.score =
+        0;
+
+    player.lastRoundPoints =
+        0;
+
+    room.players.push(
+        player
+    );
+
+    rooms.set(
+        room.code,
+        room
+    );
 
     return room;
 }
 
-function removePlayerFromRoom(player, room) {
-    if (!player || !room) return;
-
-    const index = room.players.findIndex(
-        p => p.id === player.id
-    );
-
-    if (index !== -1) {
-        room.players.splice(index, 1);
+function closeRoom(
+    room,
+    reason =
+        "Der Raum wurde geschlossen."
+) {
+    if (!room) {
+        return;
     }
 
-    player.roomCode = null;
-
-    if (player.owner) {
-        closeRoom(room);
-    }
-}
-
-function closeRoom(room) {
-    if (!room) return;
-
-    clearRoomTimers(room);
+    clearTimers(room);
 
     for (const player of room.players) {
-        player.roomCode = null;
+        player.roomCode =
+            null;
+
+        player.owner =
+            false;
+
+        player.playing =
+            true;
 
         for (const socket of player.connections) {
             send(socket, {
-                type: "room_closed",
-                message: "Der Raum wurde geschlossen."
+                type: "leftRoom"
+            });
+
+            send(socket, {
+                type: "error",
+                message: reason
             });
         }
     }
 
-    rooms.delete(room.code);
-}
-
-function clearRoomTimers(room) {
-    if (!room) return;
-
-    if (room.timer) {
-        clearInterval(room.timer);
-        room.timer = null;
-    }
-
-    if (room.turnTimer) {
-        clearTimeout(room.turnTimer);
-        room.turnTimer = null;
-    }
+    rooms.delete(
+        room.code
+    );
 }
 
 /* =========================================================
-   SPIELSTART
-   ========================================================= */
+   NEUE RUNDE
+========================================================= */
 
-function startGame(room, category) {
-    clearRoomTimers(room);
-
-    const activePlayers = getActivePlayers(room);
-
-    /*
-        WICHTIG:
-        Es müssen IMMER mindestens 2 aktive Spieler sein.
-    */
-    if (activePlayers.length < 2) {
-        return {
-            ok: false,
-            error: "Mindestens 2 aktive Spieler werden benötigt."
-        };
-    }
-
-    room.category = category;
-    room.round = 1;
-    room.results = [];
-    room.winner = null;
-
+function resetRoundScores(room) {
     for (const player of room.players) {
-        player.score = 0;
+        player.lastRoundPoints = 0;
     }
+}
+
+function startCategory(
+    room,
+    category
+) {
+    if (!room) {
+        return;
+    }
+
+    clearTimers(room);
+    resetRoundScores(room);
+
+    room.category =
+        category;
 
     if (category === "nennen") {
-        prepareNennenRound(room);
-    } else if (category === "quiz") {
-        prepareQuizRound(room);
-    } else if (category === "estimate") {
-        prepareEstimateRound(room);
-    } else {
-        return {
-            ok: false,
-            error: "Unbekannte Kategorie."
-        };
+        room.phase =
+            "nennen";
+
+        startNennenRound(room);
+
+        return;
     }
 
-    return {
-        ok: true
-    };
+    if (category === "quiz") {
+        room.phase =
+            "quiz";
+
+        startQuizRound(room);
+
+        return;
+    }
+
+    if (category === "estimate") {
+        room.phase =
+            "estimate";
+
+        startEstimateRound(room);
+    }
 }
 
 /* =========================================================
    NENNEN
-   ========================================================= */
+========================================================= */
 
-function prepareNennenRound(room) {
-    clearRoomTimers(room);
+function pickNennenPrompt() {
+    return nennenPrompts[
+        Math.floor(
+            Math.random() *
+            nennenPrompts.length
+        )
+    ];
+}
 
-    room.phase = "nennen";
+function validateNennenAnswer(
+    answer
+) {
+    const normalized =
+        normalize(answer);
 
-    const activePlayers = getConnectedActivePlayers(room);
+    if (!normalized) {
+        return {
+            valid: false,
+            reason:
+                "Bitte gib eine Antwort ein."
+        };
+    }
 
-    if (activePlayers.length < 2) {
-        finishCurrentRound(room);
+    const words =
+        Object.values(
+            nennenCategories
+        ).flat();
+
+    if (
+        words.includes(
+            normalized
+        )
+    ) {
+        return {
+            valid: true
+        };
+    }
+
+    const flexibleWords = [
+        "minecraft",
+        "creeper",
+        "zombie",
+        "skelett",
+        "spinne",
+        "enderman",
+        "diamant",
+        "eisen",
+        "gold",
+        "stein",
+        "erde",
+        "holz",
+        "schwert",
+        "bogen",
+        "armbrust",
+        "spitzhacke",
+        "axt",
+        "schaufel",
+        "hacke",
+        "obsidian",
+        "nether",
+        "enderdrache",
+        "enderperle",
+        "redstone",
+        "smaragd",
+        "lapislazuli",
+        "tnt",
+        "fackel",
+        "truhe",
+        "werkbank",
+        "ofen",
+        "dorf",
+        "wüste",
+        "dschungel",
+        "lava",
+        "wasser"
+    ];
+
+    if (
+        flexibleWords.includes(
+            normalized
+        )
+    ) {
+        return {
+            valid: true
+        };
+    }
+
+    return {
+        valid: false,
+        reason:
+            `„${answer}“ ist keine gültige Minecraft-Antwort.`
+    };
+}
+
+function startNennenRound(room) {
+    const players =
+        getActivePlayers(room);
+
+    if (players.length < 2) {
+        finishGame(
+            room,
+            "Mindestens 2 aktive Spieler werden benötigt."
+        );
+
         return;
     }
 
-    const shuffledPlayers = shuffle(activePlayers);
+    const order =
+        shuffle(players);
 
     room.game = {
-        word:
-            nennenWords[
-                Math.floor(Math.random() * nennenWords.length)
-            ],
+        prompt:
+            pickNennenPrompt(),
 
-        currentPlayerId: shuffledPlayers[0].id,
+        currentPlayerId:
+            order[0].id,
 
-        currentPlayerName: shuffledPlayers[0].name,
+        turnIndex:
+            0,
 
-        timeLeft: NENNEN_TIME,
+        order:
+            order.map(
+                player =>
+                    player.id
+            ),
 
-        submitted: {},
+        turnEndsAt:
+            Date.now() +
+            NENNEN_TIME_MS,
 
-        turnIndex: 0
+        usedAnswers:
+            new Set()
     };
 
     startNennenTimer(room);
 
-    broadcastState(room);
+    sendStateToRoom(room);
 }
 
 function startNennenTimer(room) {
-    clearInterval(room.timer);
+    clearTimers(room);
 
-    room.timer = setInterval(() => {
-        if (!room.game) return;
-
-        room.game.timeLeft--;
-
-        broadcastState(room);
-
-        if (room.game.timeLeft <= 0) {
-            clearInterval(room.timer);
-            room.timer = null;
-
-            handleNennenTimeout(room);
-        }
-    }, 1000);
-}
-
-function handleNennenTimeout(room) {
-    const activePlayers = getConnectedActivePlayers(room);
-
-    if (activePlayers.length < 2) {
-        finishCurrentRound(room);
+    if (!room.game) {
         return;
     }
 
-    /*
-        Bei Timeout verliert der aktuelle Spieler
-        die Runde.
-    */
-    const currentPlayer = room.players.find(
-        player =>
-            player.id === room.game?.currentPlayerId
+    const remaining =
+        Math.max(
+            0,
+            room.game.turnEndsAt -
+                Date.now()
+        );
+
+    room.nennenTimer =
+        setTimeout(
+            () => {
+                if (
+                    room.phase !==
+                    "nennen"
+                ) {
+                    return;
+                }
+
+                const current =
+                    room.players.find(
+                        player =>
+                            player.id ===
+                            room.game.currentPlayerId
+                    );
+
+                if (current) {
+                    current.lastRoundPoints =
+                        0;
+                }
+
+                finishNennenRound(
+                    room,
+                    `${current?.name || "Spieler"} hat die Zeit überschritten.`
+                );
+            },
+            remaining
+        );
+}
+
+function nextNennenTurn(room) {
+    const active =
+        getActivePlayers(room);
+
+    if (active.length < 2) {
+        finishGame(
+            room,
+            "Es sind nicht mehr genügend aktive Spieler übrig."
+        );
+
+        return;
+    }
+
+    const validOrder =
+        room.game.order.filter(
+            id =>
+                active.some(
+                    player =>
+                        player.id === id
+                )
+        );
+
+    if (!validOrder.length) {
+        finishNennenRound(room);
+        return;
+    }
+
+    room.game.order =
+        validOrder;
+
+    room.game.turnIndex =
+        (
+            room.game.turnIndex +
+            1
+        ) %
+        room.game.order.length;
+
+    room.game.currentPlayerId =
+        room.game.order[
+            room.game.turnIndex
+        ];
+
+    room.game.turnEndsAt =
+        Date.now() +
+        NENNEN_TIME_MS;
+
+    startNennenTimer(room);
+
+    sendStateToRoom(room);
+}
+
+function handleNennenAnswer(
+    socket,
+    data
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        return;
+    }
+
+    const room =
+        getRoom(player);
+
+    if (
+        !room ||
+        room.phase !==
+            "nennen" ||
+        !room.game
+    ) {
+        return;
+    }
+
+    if (
+        room.game.currentPlayerId !==
+        player.id
+    ) {
+        return;
+    }
+
+    const rawAnswer =
+        String(
+            data?.answer ?? ""
+        ).trim();
+
+    if (!rawAnswer) {
+        return;
+    }
+
+    const normalized =
+        normalize(rawAnswer);
+
+    if (
+        room.game.usedAnswers.has(
+            normalized
+        )
+    ) {
+        player.lastRoundPoints = 0;
+
+        finishNennenRound(
+            room,
+            `${player.name} hat einen Begriff wiederholt.`
+        );
+
+        return;
+    }
+
+    const result =
+        validateNennenAnswer(
+            rawAnswer
+        );
+
+    if (!result.valid) {
+        player.lastRoundPoints = 0;
+
+        finishNennenRound(
+            room,
+            result.reason
+        );
+
+        return;
+    }
+
+    room.game.usedAnswers.add(
+        normalized
     );
 
-    if (currentPlayer) {
-        currentPlayer.score = Math.max(
-            0,
-            currentPlayer.score - 1
-        );
-    }
+    player.lastRoundPoints =
+        1;
 
-    finishCurrentRound(room);
+    player.score += 1;
+
+    nextNennenTurn(room);
 }
 
-function handleNennenAnswer(player, answer) {
-    const room = getRoomOfPlayer(player);
+function finishNennenRound(
+    room,
+    message =
+        "Runde beendet."
+) {
+    clearTimers(room);
 
-    if (!room || room.phase !== "nennen") {
-        return;
-    }
+    room.resultsMessage =
+        message;
 
-    const game = room.game;
-
-    if (!game) return;
-
-    if (game.currentPlayerId !== player.id) {
-        sendError(
-            [...player.connections][0],
-            "Du bist gerade nicht an der Reihe."
-        );
-        return;
-    }
-
-    const normalizedAnswer = String(answer || "")
-        .trim()
-        .toLowerCase();
-
-    if (!normalizedAnswer) {
-        return;
-    }
-
-    if (
-        game.submitted &&
-        game.submitted[player.id]
-    ) {
-        return;
-    }
-
-    game.submitted[player.id] = normalizedAnswer;
-
-    /*
-        Die Runde gilt als geschafft, wenn eine gültige
-        Antwort abgegeben wurde.
-    */
-    const expectedWord = String(game.word || "")
-        .trim()
-        .toLowerCase();
-
-    if (
-        normalizedAnswer === expectedWord
-    ) {
-        player.score += 1;
-
-        finishCurrentRound(room);
-    } else {
-        /*
-            Falsche Antwort beendet die Runde.
-        */
-        finishCurrentRound(room);
-    }
+    finishRound(
+        room,
+        message
+    );
 }
 
 /* =========================================================
    QUIZ
-   ========================================================= */
+========================================================= */
 
-function prepareQuizRound(room) {
-    clearRoomTimers(room);
+function startQuizRound(room) {
+    const players =
+        getActivePlayers(room);
 
-    room.phase = "quiz";
-
-    const selected = shuffle(quizQuestions).slice(
-        0,
-        Math.min(5, quizQuestions.length)
-    );
-
-    room.game = {
-        questions: selected,
-        questionIndex: 0,
-
-        question:
-            selected[0]?.question || "",
-
-        answers:
-            selected[0]?.answers || [],
-
-        correct:
-            selected[0]?.correct ?? null,
-
-        questionNumber: 1,
-
-        totalQuestions: selected.length,
-
-        submitted: {}
-    };
-
-    broadcastState(room);
-}
-
-function handleQuizAnswer(player, answerIndex) {
-    const room = getRoomOfPlayer(player);
-
-    if (!room || room.phase !== "quiz") {
-        return;
-    }
-
-    if (!room.game) return;
-
-    const index = Number(answerIndex);
-
-    if (
-        !Number.isInteger(index) ||
-        index < 0 ||
-        index >= room.game.answers.length
-    ) {
-        return;
-    }
-
-    if (
-        room.game.submitted &&
-        room.game.submitted[player.id]
-    ) {
-        return;
-    }
-
-    room.game.submitted[player.id] = true;
-
-    const isCorrect =
-        index === room.game.correct;
-
-    if (isCorrect) {
-        player.score += 1;
-    }
-
-    const activePlayers =
-        getConnectedActivePlayers(room);
-
-    const allSubmitted =
-        activePlayers.length > 0 &&
-        activePlayers.every(
-            p => room.game.submitted[p.id]
+    if (players.length < 2) {
+        finishGame(
+            room,
+            "Mindestens 2 aktive Spieler werden benötigt."
         );
 
-    broadcastState(room);
-
-    if (allSubmitted) {
-        advanceQuizQuestion(room);
+        return;
     }
+
+    const questions =
+        shuffle(
+            quizQuestions
+        ).slice(0, 5);
+
+    const order =
+        shuffle(
+            players
+        );
+
+    room.game = {
+        questions,
+
+        questionIndex:
+            0,
+
+        current:
+            questions[0],
+
+        currentPlayerId:
+            order[0].id,
+
+        order:
+            order.map(
+                player =>
+                    player.id
+            ),
+
+        turnIndex:
+            0,
+
+        answered: {}
+    };
+
+    sendStateToRoom(room);
 }
 
-function advanceQuizQuestion(room) {
-    if (!room.game) return;
+function handleQuizAnswer(
+    socket,
+    data
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        return;
+    }
+
+    const room =
+        getRoom(player);
+
+    if (
+        !room ||
+        room.phase !==
+            "quiz" ||
+        !room.game
+    ) {
+        return;
+    }
+
+    if (
+        room.game.currentPlayerId !==
+        player.id
+    ) {
+        return;
+    }
+
+    if (
+        room.game.answered[
+            player.id
+        ]
+    ) {
+        return;
+    }
+
+    const answer =
+        Number(
+            data?.answer
+        );
+
+    if (
+        !Number.isInteger(
+            answer
+        )
+    ) {
+        return;
+    }
+
+    room.game.answered[
+        player.id
+    ] = true;
+
+    if (
+        answer ===
+        room.game.current.correct
+    ) {
+        player.lastRoundPoints =
+            1;
+
+        player.score += 1;
+    } else {
+        player.lastRoundPoints =
+            0;
+    }
+
+    sendStateToRoom(room);
+
+    setTimeout(() => {
+        if (
+            !rooms.has(
+                room.code
+            ) ||
+            room.phase !==
+                "quiz"
+        ) {
+            return;
+        }
+
+        nextQuizTurn(room);
+    }, 900);
+}
+
+function nextQuizTurn(room) {
+    const active =
+        getActivePlayers(room);
+
+    if (active.length < 2) {
+        finishGame(
+            room,
+            "Es sind nicht mehr genügend aktive Spieler übrig."
+        );
+
+        return;
+    }
 
     room.game.questionIndex++;
 
@@ -747,134 +1528,241 @@ function advanceQuizQuestion(room) {
         room.game.questionIndex >=
         room.game.questions.length
     ) {
-        finishCurrentRound(room);
+        finishRound(
+            room,
+            "Quiz-Runde beendet."
+        );
+
         return;
     }
 
-    const next =
+    room.game.order =
+        room.game.order.filter(
+            id =>
+                active.some(
+                    player =>
+                        player.id === id
+                )
+        );
+
+    if (
+        !room.game.order.length
+    ) {
+        room.game.order =
+            shuffle(active).map(
+                player =>
+                    player.id
+            );
+
+        room.game.turnIndex =
+            0;
+    } else {
+        room.game.turnIndex =
+            (
+                room.game.turnIndex +
+                1
+            ) %
+            room.game.order.length;
+    }
+
+    room.game.currentPlayerId =
+        room.game.order[
+            room.game.turnIndex
+        ];
+
+    room.game.current =
         room.game.questions[
             room.game.questionIndex
         ];
 
-    room.game.question = next.question;
-    room.game.answers = next.answers;
-    room.game.correct = next.correct;
-    room.game.questionNumber =
-        room.game.questionIndex + 1;
-    room.game.submitted = {};
+    room.game.answered = {};
 
-    broadcastState(room);
+    sendStateToRoom(room);
 }
 
 /* =========================================================
    ESTIMATE
-   ========================================================= */
+========================================================= */
 
-function prepareEstimateRound(room) {
-    clearRoomTimers(room);
+function startEstimateRound(room) {
+    const players =
+        getActivePlayers(room);
 
-    room.phase = "estimate";
+    if (players.length < 2) {
+        finishGame(
+            room,
+            "Mindestens 2 aktive Spieler werden benötigt."
+        );
 
-    const selected = shuffle(estimateQuestions).slice(
-        0,
-        Math.min(5, estimateQuestions.length)
-    );
-
-    room.game = {
-        questions: selected,
-        questionIndex: 0,
-
-        estimateQuestion:
-            selected[0]?.question || "",
-
-        correctEstimate:
-            selected[0]?.answer ?? null,
-
-        questionNumber: 1,
-
-        totalQuestions: selected.length,
-
-        submitted: {},
-
-        answers: {}
-    };
-
-    broadcastState(room);
-}
-
-function handleEstimateAnswer(player, value) {
-    const room = getRoomOfPlayer(player);
-
-    if (!room || room.phase !== "estimate") {
         return;
     }
 
-    if (!room.game) return;
+    const questions =
+        shuffle(
+            estimateQuestions
+        ).slice(0, 5);
+
+    const order =
+        shuffle(
+            players
+        );
+
+    room.game = {
+        questions,
+
+        questionIndex:
+            0,
+
+        current:
+            questions[0],
+
+        currentPlayerId:
+            order[0].id,
+
+        order:
+            order.map(
+                player =>
+                    player.id
+            ),
+
+        turnIndex:
+            0,
+
+        answered: {}
+    };
+
+    sendStateToRoom(room);
+}
+
+function calculateEstimatePoints(
+    guess,
+    correct
+) {
+    if (guess === correct) {
+        return 3;
+    }
 
     if (
-        room.game.submitted &&
-        room.game.submitted[player.id]
+        correct === 0
+    ) {
+        return 0;
+    }
+
+    const percentage =
+        Math.abs(
+            guess - correct
+        ) /
+        Math.abs(correct) *
+        100;
+
+    if (percentage <= 5) {
+        return 2;
+    }
+
+    if (percentage <= 15) {
+        return 1;
+    }
+
+    return 0;
+}
+
+function handleEstimateAnswer(
+    socket,
+    data
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        return;
+    }
+
+    const room =
+        getRoom(player);
+
+    if (
+        !room ||
+        room.phase !==
+            "estimate" ||
+        !room.game
     ) {
         return;
     }
 
-    const numericValue = Number(value);
-
-    if (!Number.isFinite(numericValue)) {
+    if (
+        room.game.currentPlayerId !==
+        player.id
+    ) {
         return;
     }
 
-    const correct =
-        Number(room.game.correctEstimate);
-
-    if (!Number.isFinite(correct)) {
+    if (
+        room.game.answered[
+            player.id
+        ]
+    ) {
         return;
     }
 
-    const difference =
-        Math.abs(numericValue - correct);
+    const guess =
+        Number(
+            data?.answer
+        );
 
-    const percentDifference =
-        correct === 0
-            ? difference === 0
-                ? 0
-                : Infinity
-            : (difference / Math.abs(correct)) * 100;
-
-    let points = 0;
-
-    if (difference === 0) {
-        points = 3;
-    } else if (percentDifference <= 5) {
-        points = 2;
-    } else if (percentDifference <= 15) {
-        points = 1;
+    if (
+        !Number.isFinite(
+            guess
+        )
+    ) {
+        return;
     }
+
+    room.game.answered[
+        player.id
+    ] = true;
+
+    const points =
+        calculateEstimatePoints(
+            guess,
+            Number(
+                room.game.current.answer
+            )
+        );
+
+    player.lastRoundPoints =
+        points;
 
     player.score += points;
 
-    room.game.submitted[player.id] = true;
+    sendStateToRoom(room);
 
-    room.game.answers[player.id] = numericValue;
+    setTimeout(() => {
+        if (
+            !rooms.has(
+                room.code
+            ) ||
+            room.phase !==
+                "estimate"
+        ) {
+            return;
+        }
 
-    const activePlayers =
-        getConnectedActivePlayers(room);
-
-    const allSubmitted =
-        activePlayers.length > 0 &&
-        activePlayers.every(
-            p => room.game.submitted[p.id]
-        );
-
-    broadcastState(room);
-
-    if (allSubmitted) {
-        advanceEstimateQuestion(room);
-    }
+        nextEstimateTurn(room);
+    }, 900);
 }
 
-function advanceEstimateQuestion(room) {
-    if (!room.game) return;
+function nextEstimateTurn(room) {
+    const active =
+        getActivePlayers(room);
+
+    if (active.length < 2) {
+        finishGame(
+            room,
+            "Es sind nicht mehr genügend aktive Spieler übrig."
+        );
+
+        return;
+    }
 
     room.game.questionIndex++;
 
@@ -882,291 +1770,1034 @@ function advanceEstimateQuestion(room) {
         room.game.questionIndex >=
         room.game.questions.length
     ) {
-        finishCurrentRound(room);
+        finishRound(
+            room,
+            "Schätzfragen-Runde beendet."
+        );
+
         return;
     }
 
-    const next =
+    room.game.order =
+        room.game.order.filter(
+            id =>
+                active.some(
+                    player =>
+                        player.id === id
+                )
+        );
+
+    if (
+        !room.game.order.length
+    ) {
+        room.game.order =
+            shuffle(active).map(
+                player =>
+                    player.id
+            );
+
+        room.game.turnIndex =
+            0;
+    } else {
+        room.game.turnIndex =
+            (
+                room.game.turnIndex +
+                1
+            ) %
+            room.game.order.length;
+    }
+
+    room.game.currentPlayerId =
+        room.game.order[
+            room.game.turnIndex
+        ];
+
+    room.game.current =
         room.game.questions[
             room.game.questionIndex
         ];
 
-    room.game.estimateQuestion =
-        next.question;
+    room.game.answered = {};
 
-    room.game.correctEstimate =
-        next.answer;
-
-    room.game.questionNumber =
-        room.game.questionIndex + 1;
-
-    room.game.submitted = {};
-    room.game.answers = {};
-
-    broadcastState(room);
+    sendStateToRoom(room);
 }
 
 /* =========================================================
    RUNDENENDE
-   ========================================================= */
+========================================================= */
 
-function finishCurrentRound(room) {
-    if (!room) return;
+function finishRound(
+    room,
+    message =
+        "Runde beendet."
+) {
+    clearTimers(room);
 
-    clearRoomTimers(room);
+    room.resultsMessage =
+        message;
 
-    room.phase = "results";
+    room.phase =
+        "results";
 
-    const activePlayers =
-        getActivePlayers(room);
+    room.game =
+        null;
 
-    room.results = activePlayers
-        .map(player => ({
-            id: player.id,
-            name: player.name,
-            roundScore: player.score || 0,
-            totalScore: player.score || 0
-        }))
-        .sort(
-            (a, b) =>
-                b.roundScore - a.roundScore
-        );
-
-    broadcastState(room);
-
-    if (room.round >= room.totalRounds) {
-        finishGame(room);
-    }
+    sendStateToRoom(room);
 }
 
-function continueNextRound(room) {
-    if (!room) return;
+function startNextRound(room) {
+    const active =
+        getActivePlayers(room);
 
-    if (room.round >= room.totalRounds) {
+    if (active.length < 2) {
+        finishGame(
+            room,
+            "Mindestens 2 aktive Spieler werden benötigt."
+        );
+
+        return;
+    }
+
+    if (
+        room.round >=
+        TOTAL_ROUNDS
+    ) {
         finishGame(room);
         return;
     }
 
     room.round++;
 
-    if (room.category === "nennen") {
-        prepareNennenRound(room);
-    } else if (room.category === "quiz") {
-        prepareQuizRound(room);
-    } else if (room.category === "estimate") {
-        prepareEstimateRound(room);
+    startCategory(
+        room,
+        room.category
+    );
+}
+
+function finishGame(
+    room,
+    message =
+        "Spiel beendet."
+) {
+    clearTimers(room);
+
+    room.phase =
+        "final";
+
+    room.game =
+        null;
+
+    room.finalMessage =
+        message;
+
+    sendStateToRoom(room);
+}
+
+function restartRoom(room) {
+    clearTimers(room);
+
+    room.phase =
+        "lobby";
+
+    room.category =
+        null;
+
+    room.round =
+        0;
+
+    room.game =
+        null;
+
+    room.resultsMessage =
+        "";
+
+    room.finalMessage =
+        "";
+
+    for (const player of room.players) {
+        player.score =
+            0;
+
+        player.lastRoundPoints =
+            0;
+    }
+
+    sendStateToRoom(room);
+}
+
+/* =========================================================
+   PLAYER ERSTELLEN
+========================================================= */
+
+function createPlayer(
+    identityId
+) {
+    const identity =
+        String(
+            identityId || ""
+        ).trim() ||
+        randomId();
+
+    const existing =
+        playersByIdentity.get(
+            identity
+        );
+
+    if (existing) {
+        return existing;
+    }
+
+    const player = {
+        id:
+            randomId(),
+
+        identityId:
+            identity,
+
+        name:
+            "Spieler",
+
+        owner:
+            false,
+
+        playing:
+            true,
+
+        roomCode:
+            null,
+
+        score:
+            0,
+
+        lastRoundPoints:
+            0,
+
+        connections:
+            new Set()
+    };
+
+    playersById.set(
+        player.id,
+        player
+    );
+
+    playersByIdentity.set(
+        player.identityId,
+        player
+    );
+
+    return player;
+}
+
+function attachSocketToPlayer(
+    player,
+    socket
+) {
+    if (!player) {
+        return;
+    }
+
+    player.connections.add(
+        socket
+    );
+
+    socket.playerId =
+        player.id;
+}
+
+/* =========================================================
+   IDENTIFY
+========================================================= */
+
+function handleIdentify(
+    socket,
+    data
+) {
+    const identityId =
+        String(
+            data?.identityId || ""
+        ).trim();
+
+    let player =
+        identityId
+            ? playersByIdentity.get(
+                  identityId
+              )
+            : null;
+
+    if (!player) {
+        player =
+            createPlayer(
+                identityId
+            );
+    }
+
+    attachSocketToPlayer(
+        player,
+        socket
+    );
+
+    send(socket, {
+        type: "identified",
+
+        playerId:
+            player.id,
+
+        identityId:
+            player.identityId,
+
+        name:
+            player.name
+    });
+
+    /*
+        Dem gerade verbundenen Client
+        sofort den aktuellen Online-Stand senden.
+    */
+    broadcastOnlineCount();
+
+    const room =
+        getRoom(player);
+
+    if (room) {
+        send(socket, {
+            type: "state",
+            state:
+                buildState(
+                    room,
+                    player
+                )
+        });
     }
 }
 
-function finishGame(room) {
-    clearRoomTimers(room);
+/* =========================================================
+   CREATE ROOM
+========================================================= */
 
-    room.phase = "final";
+function handleCreateRoom(
+    socket,
+    data
+) {
+    let player =
+        getPlayerBySocket(socket);
 
-    const activePlayers =
+    if (!player) {
+        player =
+            createPlayer(
+                data?.identityId
+            );
+
+        attachSocketToPlayer(
+            player,
+            socket
+        );
+    }
+
+    if (player.roomCode) {
+        sendError(
+            socket,
+            "Du bist bereits in einem Raum."
+        );
+
+        return;
+    }
+
+    player.name =
+        safeName(
+            data?.name
+        );
+
+    player.owner =
+        true;
+
+    player.playing =
+        true;
+
+    const room =
+        createRoom(player);
+
+    socket.playerId =
+        player.id;
+
+    send(socket, {
+        type: "roomCreated",
+        code: room.code
+    });
+
+    sendStateToRoom(room);
+}
+
+/* =========================================================
+   JOIN ROOM
+========================================================= */
+
+function handleJoinRoom(
+    socket,
+    data
+) {
+    let player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        player =
+            createPlayer(
+                data?.identityId
+            );
+
+        attachSocketToPlayer(
+            player,
+            socket
+        );
+    }
+
+    if (player.roomCode) {
+        sendError(
+            socket,
+            "Du bist bereits in einem Raum."
+        );
+
+        return;
+    }
+
+    const code =
+        String(
+            data?.code ?? ""
+        )
+            .trim()
+            .toUpperCase();
+
+    if (!code) {
+        sendError(
+            socket,
+            "Bitte gib einen Raumcode ein."
+        );
+
+        return;
+    }
+
+    const room =
+        rooms.get(code);
+
+    if (!room) {
+        sendError(
+            socket,
+            "Dieser Raum wurde nicht gefunden."
+        );
+
+        return;
+    }
+
+    if (
+        room.phase !==
+        "lobby"
+    ) {
+        sendError(
+            socket,
+            "Das Spiel läuft bereits."
+        );
+
+        return;
+    }
+
+    if (
+        room.players.length >=
+        MAX_PLAYERS
+    ) {
+        sendError(
+            socket,
+            "Der Raum ist voll."
+        );
+
+        return;
+    }
+
+    player.name =
+        safeName(
+            data?.name
+        );
+
+    player.owner =
+        false;
+
+    player.playing =
+        true;
+
+    player.score =
+        0;
+
+    player.lastRoundPoints =
+        0;
+
+    player.roomCode =
+        room.code;
+
+    room.players.push(
+        player
+    );
+
+    socket.playerId =
+        player.id;
+
+    send(socket, {
+        type: "joinedRoom",
+        code:
+            room.code
+    });
+
+    sendStateToRoom(room);
+}
+
+/* =========================================================
+   LEAVE ROOM
+========================================================= */
+
+function handleLeaveRoom(
+    socket
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        return;
+    }
+
+    const room =
+        getRoom(player);
+
+    if (!room) {
+        send(socket, {
+            type: "leftRoom"
+        });
+
+        return;
+    }
+
+    if (
+        player.id ===
+        room.ownerId
+    ) {
+        closeRoom(
+            room,
+            "Der Besitzer hat den Raum geschlossen."
+        );
+
+        return;
+    }
+
+    removePlayer(
+        player,
+        room
+    );
+
+    send(socket, {
+        type: "leftRoom"
+    });
+
+    checkRunningGame(
+        room
+    );
+}
+
+/* =========================================================
+   REMOVE PLAYER
+========================================================= */
+
+function removePlayer(
+    player,
+    room
+) {
+    const index =
+        room.players.findIndex(
+            item =>
+                item.id ===
+                player.id
+        );
+
+    if (index !== -1) {
+        room.players.splice(
+            index,
+            1
+        );
+    }
+
+    player.roomCode =
+        null;
+
+    player.owner =
+        false;
+
+    player.playing =
+        true;
+
+    player.score =
+        0;
+
+    player.lastRoundPoints =
+        0;
+}
+
+function checkRunningGame(
+    room
+) {
+    if (!room) {
+        return;
+    }
+
+    if (
+        room.phase ===
+            "lobby" ||
+        room.phase ===
+            "category" ||
+        room.phase ===
+            "results" ||
+        room.phase ===
+            "final"
+    ) {
+        sendStateToRoom(room);
+        return;
+    }
+
+    const active =
         getActivePlayers(room);
 
-    const ranking = activePlayers
-        .map(player => ({
-            id: player.id,
-            name: player.name,
-            score: player.score || 0
-        }))
-        .sort(
-            (a, b) =>
-                b.score - a.score
+    if (active.length < 2) {
+        finishGame(
+            room,
+            "Es sind nicht mehr genügend aktive Spieler übrig."
         );
 
-    room.winner = ranking[0] || null;
+        return;
+    }
 
-    broadcastState(room);
+    if (
+        room.game &&
+        room.game.currentPlayerId
+    ) {
+        const current =
+            room.players.find(
+                player =>
+                    player.id ===
+                    room.game.currentPlayerId
+            );
+
+        if (!current) {
+            if (
+                room.phase ===
+                "nennen"
+            ) {
+                nextNennenTurn(room);
+            } else if (
+                room.phase ===
+                "quiz"
+            ) {
+                nextQuizTurn(room);
+            } else if (
+                room.phase ===
+                "estimate"
+            ) {
+                nextEstimateTurn(room);
+            }
+
+            return;
+        }
+    }
+
+    sendStateToRoom(room);
 }
 
 /* =========================================================
-   HTTP SERVER
-   ========================================================= */
+   OWNER PARTICIPATION
+========================================================= */
 
-const server = http.createServer(
-    (request, response) => {
-        try {
-            let requestPath =
-                decodeURIComponent(
-                    request.url.split("?")[0]
-                );
+function handleSetOwnerParticipation(
+    socket,
+    data
+) {
+    const player =
+        getPlayerBySocket(socket);
 
-            if (requestPath === "/") {
-                requestPath = "/index.html";
-            }
-
-            const filePath = path.join(
-                __dirname,
-                requestPath
-            );
-
-            /*
-                Verhindert Zugriff außerhalb
-                des Projektordners.
-            */
-            const normalizedPath =
-                path.normalize(filePath);
-
-            if (
-                !normalizedPath.startsWith(
-                    path.normalize(__dirname)
-                )
-            ) {
-                response.writeHead(403);
-                response.end("Forbidden");
-                return;
-            }
-
-            fs.stat(
-                normalizedPath,
-                (error, stats) => {
-                    if (error || !stats.isFile()) {
-                        response.writeHead(404);
-                        response.end("Not found");
-                        return;
-                    }
-
-                    const ext =
-                        path.extname(normalizedPath)
-                            .toLowerCase();
-
-                    const mimeTypes = {
-                        ".html": "text/html; charset=utf-8",
-                        ".js": "text/javascript; charset=utf-8",
-                        ".css": "text/css; charset=utf-8",
-                        ".json": "application/json; charset=utf-8",
-                        ".png": "image/png",
-                        ".jpg": "image/jpeg",
-                        ".jpeg": "image/jpeg",
-                        ".gif": "image/gif",
-                        ".svg": "image/svg+xml",
-                        ".ico": "image/x-icon",
-                        ".webp": "image/webp"
-                    };
-
-                    response.writeHead(200, {
-                        "Content-Type":
-                            mimeTypes[ext] ||
-                            "application/octet-stream"
-                    });
-
-                    fs.createReadStream(
-                        normalizedPath
-                    ).pipe(response);
-                }
-            );
-        } catch (error) {
-            console.error(
-                "HTTP-Fehler:",
-                error
-            );
-
-            response.writeHead(500);
-            response.end("Internal Server Error");
-        }
+    if (!player) {
+        return;
     }
-);
+
+    const room =
+        getRoom(player);
+
+    if (
+        !room ||
+        player.id !==
+            room.ownerId
+    ) {
+        return;
+    }
+
+    if (
+        room.phase !==
+        "lobby"
+    ) {
+        return;
+    }
+
+    const playing =
+        data?.playing === true;
+
+    player.playing =
+        playing;
+
+    room.ownerPlaying =
+        playing;
+
+    sendStateToRoom(room);
+}
 
 /* =========================================================
-   WEBSOCKET
-   ========================================================= */
+   START GAME
+========================================================= */
 
-const wss = new WebSocket.Server({
-    server
-});
+function handleStartGame(
+    socket
+) {
+    const player =
+        getPlayerBySocket(socket);
 
-wss.on("connection", socket => {
-    clients.add(socket);
+    if (!player) {
+        return;
+    }
 
-    socket.on("message", raw => {
-        let data;
+    const room =
+        getRoom(player);
 
-        try {
-            data = JSON.parse(
-                raw.toString()
-            );
-        } catch {
-            sendError(
-                socket,
-                "Ungültige Nachricht."
-            );
-            return;
-        }
-
-        handleMessage(socket, data);
-    });
-
-    socket.on("close", () => {
-        clients.delete(socket);
-
-        handleDisconnect(socket);
-    });
-
-    socket.on("error", error => {
-        console.error(
-            "WebSocket Fehler:",
-            error
+    if (!room) {
+        sendError(
+            socket,
+            "Du bist in keinem Raum."
         );
-    });
-});
+
+        return;
+    }
+
+    if (
+        player.id !==
+        room.ownerId
+    ) {
+        sendError(
+            socket,
+            "Nur der Besitzer kann das Spiel starten."
+        );
+
+        return;
+    }
+
+    if (
+        room.phase !==
+        "lobby"
+    ) {
+        return;
+    }
+
+    const active =
+        getActivePlayers(room);
+
+    /*
+        IMMER mindestens 2 aktive Spieler.
+    */
+    if (active.length < 2) {
+        sendError(
+            socket,
+            "Mindestens 2 aktive Spieler werden benötigt."
+        );
+
+        return;
+    }
+
+    room.round =
+        1;
+
+    room.category =
+        null;
+
+    room.phase =
+        "category";
+
+    for (const p of room.players) {
+        p.lastRoundPoints =
+            0;
+
+        p.score =
+            0;
+    }
+
+    sendStateToRoom(room);
+}
+
+/* =========================================================
+   CATEGORY
+========================================================= */
+
+function handleChooseCategory(
+    socket,
+    data
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        return;
+    }
+
+    const room =
+        getRoom(player);
+
+    if (!room) {
+        return;
+    }
+
+    if (
+        player.id !==
+        room.ownerId
+    ) {
+        sendError(
+            socket,
+            "Nur der Besitzer kann die Kategorie auswählen."
+        );
+
+        return;
+    }
+
+    if (
+        room.phase !==
+        "category"
+    ) {
+        return;
+    }
+
+    const category =
+        String(
+            data?.category || ""
+        ).toLowerCase();
+
+    if (
+        ![
+            "nennen",
+            "quiz",
+            "estimate"
+        ].includes(
+            category
+        )
+    ) {
+        sendError(
+            socket,
+            "Ungültige Kategorie."
+        );
+
+        return;
+    }
+
+    const active =
+        getActivePlayers(room);
+
+    if (active.length < 2) {
+        sendError(
+            socket,
+            "Mindestens 2 aktive Spieler werden benötigt."
+        );
+
+        return;
+    }
+
+    startCategory(
+        room,
+        category
+    );
+}
+
+/* =========================================================
+   CONTINUE ROUND
+========================================================= */
+
+function handleContinueRound(
+    socket
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        return;
+    }
+
+    const room =
+        getRoom(player);
+
+    if (!room) {
+        return;
+    }
+
+    if (
+        player.id !==
+        room.ownerId
+    ) {
+        sendError(
+            socket,
+            "Nur der Besitzer kann fortfahren."
+        );
+
+        return;
+    }
+
+    if (
+        room.phase !==
+        "results"
+    ) {
+        return;
+    }
+
+    if (
+        room.round >=
+        TOTAL_ROUNDS
+    ) {
+        finishGame(room);
+        return;
+    }
+
+    startNextRound(room);
+}
+
+/* =========================================================
+   RESTART
+========================================================= */
+
+function handleRestart(
+    socket
+) {
+    const player =
+        getPlayerBySocket(socket);
+
+    if (!player) {
+        return;
+    }
+
+    const room =
+        getRoom(player);
+
+    if (!room) {
+        return;
+    }
+
+    if (
+        player.id !==
+        room.ownerId
+    ) {
+        return;
+    }
+
+    restartRoom(room);
+}
 
 /* =========================================================
    MESSAGE HANDLER
-   ========================================================= */
+========================================================= */
 
-function handleMessage(socket, data) {
-    const type = data?.type;
+function handleMessage(
+    socket,
+    data
+) {
+    if (
+        !data ||
+        typeof data !==
+            "object"
+    ) {
+        sendError(
+            socket,
+            "Ungültige Nachricht."
+        );
 
-    switch (type) {
+        return;
+    }
+
+    switch (
+        String(
+            data.type || ""
+        )
+    ) {
         case "identify":
-            handleIdentify(socket, data);
+            handleIdentify(
+                socket,
+                data
+            );
             break;
 
-        case "create_room":
-            handleCreateRoom(socket, data);
+        case "createRoom":
+            handleCreateRoom(
+                socket,
+                data
+            );
             break;
 
-        case "join_room":
-            handleJoinRoom(socket, data);
+        case "joinRoom":
+            handleJoinRoom(
+                socket,
+                data
+            );
             break;
 
-        case "leave_room":
-            handleLeaveRoom(socket);
+        case "leaveRoom":
+            handleLeaveRoom(
+                socket
+            );
             break;
 
-        case "set_playing":
-            handleSetPlaying(socket, data);
+        case "setOwnerParticipation":
+            handleSetOwnerParticipation(
+                socket,
+                data
+            );
             break;
 
-        case "start_game":
-            handleStartGame(socket, data);
+        case "startGame":
+            handleStartGame(
+                socket
+            );
             break;
 
-        case "start_category":
-            handleStartCategory(socket, data);
+        case "chooseCategory":
+            handleChooseCategory(
+                socket,
+                data
+            );
             break;
 
-        case "nennen_answer":
-            handleNennenMessage(socket, data);
+        case "nennenAnswer":
+            handleNennenAnswer(
+                socket,
+                data
+            );
             break;
 
-        case "quiz_answer":
-            handleQuizMessage(socket, data);
+        case "quizAnswer":
+            handleQuizAnswer(
+                socket,
+                data
+            );
             break;
 
-        case "estimate_answer":
-            handleEstimateMessage(socket, data);
+        case "estimateAnswer":
+            handleEstimateAnswer(
+                socket,
+                data
+            );
             break;
 
-        case "next_round":
-            handleNextRound(socket);
+        case "continueRound":
+            handleContinueRound(
+                socket
+            );
             break;
 
         case "restart":
-            handleRestart(socket);
+            handleRestart(
+                socket
+            );
             break;
 
         default:
@@ -1178,499 +2809,256 @@ function handleMessage(socket, data) {
 }
 
 /* =========================================================
-   IDENTIFY
-   ========================================================= */
+   HTTP SERVER
+========================================================= */
 
-function handleIdentify(socket, data) {
-    let identityId =
-        String(data.identityId || "")
-            .trim();
+const server =
+    http.createServer(
+        (request, response) => {
+            try {
+                let requestPath =
+                    decodeURIComponent(
+                        request.url.split("?")[0]
+                    );
 
-    let playerId =
-        String(data.playerId || "")
-            .trim();
+                if (
+                    requestPath ===
+                    "/"
+                ) {
+                    requestPath =
+                        "/index.html";
+                }
 
-    if (!identityId) {
-        identityId = randomId();
-    }
+                const filePath =
+                    path.join(
+                        __dirname,
+                        requestPath
+                    );
 
-    if (!playerId) {
-        playerId = randomId();
-    }
+                const normalizedFilePath =
+                    path.normalize(
+                        filePath
+                    );
 
-    let player =
-        playersById.get(playerId);
+                const normalizedRoot =
+                    path.normalize(
+                        __dirname
+                    );
 
-    if (!player) {
-        player = {
-            id: playerId,
+                if (
+                    normalizedFilePath !==
+                        normalizedRoot &&
+                    !normalizedFilePath.startsWith(
+                        normalizedRoot +
+                            path.sep
+                    )
+                ) {
+                    response.writeHead(
+                        403
+                    );
 
-            identityId,
+                    response.end(
+                        "Forbidden"
+                    );
 
-            name: safeName(data.name),
+                    return;
+                }
 
-            owner: false,
+                fs.stat(
+                    normalizedFilePath,
+                    (
+                        error,
+                        stats
+                    ) => {
+                        if (
+                            error ||
+                            !stats.isFile()
+                        ) {
+                            response.writeHead(
+                                404
+                            );
 
-            playing: true,
+                            response.end(
+                                "Not found"
+                            );
 
-            roomCode: null,
+                            return;
+                        }
 
-            score: 0,
+                        const extension =
+                            path
+                                .extname(
+                                    normalizedFilePath
+                                )
+                                .toLowerCase();
 
-            connections: new Set()
-        };
+                        const mimeTypes =
+                            {
+                                ".html":
+                                    "text/html; charset=utf-8",
 
-        playersById.set(
-            playerId,
-            player
-        );
-    }
+                                ".js":
+                                    "text/javascript; charset=utf-8",
 
-    player.identityId = identityId;
+                                ".css":
+                                    "text/css; charset=utf-8",
 
-    if (data.name) {
-        player.name = safeName(data.name);
-    }
+                                ".json":
+                                    "application/json; charset=utf-8",
 
-    player.connections.add(socket);
+                                ".png":
+                                    "image/png",
 
-    socket.playerId = player.id;
+                                ".jpg":
+                                    "image/jpeg",
 
-    playersByIdentity.set(
-        identityId,
-        player
+                                ".jpeg":
+                                    "image/jpeg",
+
+                                ".gif":
+                                    "image/gif",
+
+                                ".svg":
+                                    "image/svg+xml",
+
+                                ".webp":
+                                    "image/webp",
+
+                                ".ico":
+                                    "image/x-icon"
+                            };
+
+                        response.writeHead(
+                            200,
+                            {
+                                "Content-Type":
+                                    mimeTypes[
+                                        extension
+                                    ] ||
+                                    "application/octet-stream"
+                            }
+                        );
+
+                        fs.createReadStream(
+                            normalizedFilePath
+                        ).pipe(
+                            response
+                        );
+                    }
+                );
+            } catch (error) {
+                console.error(
+                    "HTTP-Fehler:",
+                    error
+                );
+
+                response.writeHead(
+                    500
+                );
+
+                response.end(
+                    "Internal Server Error"
+                );
+            }
+        }
     );
 
-    send(socket, {
-        type: "identified",
+/* =========================================================
+   WEBSOCKET
+========================================================= */
 
-        playerId: player.id,
-
-        identityId: player.identityId,
-
-        name: player.name
+const wss =
+    new WebSocket.Server({
+        server
     });
 
-    const room = getRoomOfPlayer(player);
+wss.on(
+    "connection",
+    socket => {
+        clients.add(socket);
 
-    if (room) {
-        send(socket, buildRoomState(room));
-    }
-}
+        /*
+            Sofort an ALLE bestehenden Clients
+            den neuen Online-Stand senden.
+        */
+        broadcastOnlineCount();
 
-/* =========================================================
-   ROOM CREATE
-   ========================================================= */
+        socket.on(
+            "message",
+            raw => {
+                try {
+                    const data =
+                        JSON.parse(
+                            raw.toString()
+                        );
 
-function handleCreateRoom(socket, data) {
-    const player =
-        getPlayerBySocket(socket);
+                    handleMessage(
+                        socket,
+                        data
+                    );
+                } catch (error) {
+                    console.error(
+                        "Nachrichtenfehler:",
+                        error
+                    );
 
-    if (!player) {
-        sendError(
-            socket,
-            "Bitte zuerst identifizieren."
-        );
-        return;
-    }
-
-    if (player.roomCode) {
-        sendError(
-            socket,
-            "Du bist bereits in einem Raum."
-        );
-        return;
-    }
-
-    player.name = safeName(data.name);
-
-    player.owner = true;
-    player.playing =
-        data.playing !== false;
-
-    player.score = 0;
-
-    const room =
-        createRoom(player);
-
-    send(socket, {
-        type: "room_created",
-        roomCode: room.code
-    });
-
-    broadcastState(room);
-}
-
-/* =========================================================
-   JOIN ROOM
-   ========================================================= */
-
-function handleJoinRoom(socket, data) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) {
-        sendError(
-            socket,
-            "Bitte zuerst identifizieren."
-        );
-        return;
-    }
-
-    if (player.roomCode) {
-        sendError(
-            socket,
-            "Du bist bereits in einem Raum."
-        );
-        return;
-    }
-
-    const code =
-        String(data.roomCode || "")
-            .trim()
-            .toUpperCase();
-
-    const room =
-        rooms.get(code);
-
-    if (!room) {
-        sendError(
-            socket,
-            "Raum nicht gefunden."
-        );
-        return;
-    }
-
-    if (room.phase !== "lobby") {
-        sendError(
-            socket,
-            "Das Spiel wurde bereits gestartet."
-        );
-        return;
-    }
-
-    if (room.players.length >= MAX_PLAYERS) {
-        sendError(
-            socket,
-            "Der Raum ist voll."
-        );
-        return;
-    }
-
-    player.name =
-        safeName(data.name);
-
-    player.owner = false;
-    player.playing = true;
-    player.roomCode = room.code;
-    player.score = 0;
-
-    room.players.push(player);
-
-    send(socket, {
-        type: "room_joined",
-        roomCode: room.code
-    });
-
-    broadcastState(room);
-}
-
-/* =========================================================
-   LEAVE
-   ========================================================= */
-
-function handleLeaveRoom(socket) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) return;
-
-    const room =
-        getRoomOfPlayer(player);
-
-    if (!room) return;
-
-    if (player.owner) {
-        closeRoom(room);
-        return;
-    }
-
-    removePlayerFromRoom(
-        player,
-        room
-    );
-
-    broadcastState(room);
-}
-
-/* =========================================================
-   PLAYING TOGGLE
-   ========================================================= */
-
-function handleSetPlaying(socket, data) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) return;
-
-    if (!player.owner) {
-        return;
-    }
-
-    const room =
-        getRoomOfPlayer(player);
-
-    if (!room) return;
-
-    if (room.phase !== "lobby") {
-        return;
-    }
-
-    player.playing =
-        data.playing === true;
-
-    broadcastState(room);
-}
-
-/* =========================================================
-   START GAME
-   ========================================================= */
-
-function handleStartGame(socket, data) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) return;
-
-    const room =
-        getRoomOfPlayer(player);
-
-    if (!room) {
-        sendError(
-            socket,
-            "Du bist in keinem Raum."
-        );
-        return;
-    }
-
-    if (player.id !== room.ownerId) {
-        sendError(
-            socket,
-            "Nur der Besitzer kann das Spiel starten."
-        );
-        return;
-    }
-
-    if (room.phase !== "lobby") {
-        sendError(
-            socket,
-            "Das Spiel läuft bereits."
-        );
-        return;
-    }
-
-    const activePlayers =
-        getActivePlayers(room);
-
-    /*
-        WICHTIG:
-        IMMER mindestens 2 aktive Spieler.
-    */
-    if (activePlayers.length < 2) {
-        sendError(
-            socket,
-            "Mindestens 2 aktive Spieler werden benötigt."
-        );
-        return;
-    }
-
-    const category =
-        String(
-            data.category ||
-            ""
-        ).toLowerCase();
-
-    const result =
-        startGame(
-            room,
-            category
+                    sendError(
+                        socket,
+                        "Ungültige Servernachricht."
+                    );
+                }
+            }
         );
 
-    if (!result.ok) {
-        sendError(
-            socket,
-            result.error
+        socket.on(
+            "close",
+            () => {
+                handleDisconnect(
+                    socket
+                );
+
+                clients.delete(
+                    socket
+                );
+
+                /*
+                    Nach dem Entfernen wird
+                    der neue Stand versendet.
+                */
+                broadcastOnlineCount();
+            }
         );
-        return;
-    }
 
-    broadcastState(room);
-}
-
-/*
-    Optionaler Alias für Frontends,
-    die start_category verwenden.
-*/
-function handleStartCategory(
-    socket,
-    data
-) {
-    handleStartGame(socket, {
-        type: "start_game",
-        category: data.category
-    });
-}
-
-/* =========================================================
-   NENNEN MESSAGE
-   ========================================================= */
-
-function handleNennenMessage(
-    socket,
-    data
-) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) return;
-
-    handleNennenAnswer(
-        player,
-        data.answer
-    );
-}
-
-/* =========================================================
-   QUIZ MESSAGE
-   ========================================================= */
-
-function handleQuizMessage(
-    socket,
-    data
-) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) return;
-
-    handleQuizAnswer(
-        player,
-        data.answerIndex
-    );
-}
-
-/* =========================================================
-   ESTIMATE MESSAGE
-   ========================================================= */
-
-function handleEstimateMessage(
-    socket,
-    data
-) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) return;
-
-    handleEstimateAnswer(
-        player,
-        data.answer
-    );
-}
-
-/* =========================================================
-   NEXT ROUND
-   ========================================================= */
-
-function handleNextRound(socket) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) return;
-
-    const room =
-        getRoomOfPlayer(player);
-
-    if (!room) return;
-
-    if (player.id !== room.ownerId) {
-        sendError(
-            socket,
-            "Nur der Besitzer kann die nächste Runde starten."
+        socket.on(
+            "error",
+            error => {
+                console.error(
+                    "WebSocket-Fehler:",
+                    error.message
+                );
+            }
         );
-        return;
     }
-
-    if (room.phase !== "results") {
-        return;
-    }
-
-    const activePlayers =
-        getActivePlayers(room);
-
-    if (activePlayers.length < 2) {
-        finishGame(room);
-        return;
-    }
-
-    continueNextRound(room);
-}
-
-/* =========================================================
-   RESTART
-   ========================================================= */
-
-function handleRestart(socket) {
-    const player =
-        getPlayerBySocket(socket);
-
-    if (!player) return;
-
-    const room =
-        getRoomOfPlayer(player);
-
-    if (!room) return;
-
-    if (player.id !== room.ownerId) {
-        sendError(
-            socket,
-            "Nur der Besitzer kann neu starten."
-        );
-        return;
-    }
-
-    clearRoomTimers(room);
-
-    room.phase = "lobby";
-    room.category = null;
-    room.round = 0;
-    room.game = null;
-    room.results = [];
-    room.winner = null;
-
-    for (const p of room.players) {
-        p.score = 0;
-    }
-
-    broadcastState(room);
-}
+);
 
 /* =========================================================
    DISCONNECT
-   ========================================================= */
+========================================================= */
 
-function handleDisconnect(socket) {
+function handleDisconnect(
+    socket
+) {
     const player =
         getPlayerBySocket(socket);
 
-    if (!player) return;
+    if (!player) {
+        return;
+    }
 
-    player.connections.delete(socket);
+    player.connections.delete(
+        socket
+    );
 
-    /*
-        Spieler bleibt im Raum, wenn nur eine
-        einzelne Verbindung getrennt wurde.
-    */
     if (
         player.connections.size > 0
     ) {
@@ -1678,48 +3066,72 @@ function handleDisconnect(socket) {
     }
 
     const room =
-        getRoomOfPlayer(player);
+        getRoom(player);
 
-    if (!room) return;
-
-    /*
-        Besitzer verlässt -> kompletter Raum weg.
-    */
-    if (player.owner) {
-        closeRoom(room);
+    if (!room) {
         return;
     }
 
     /*
-        Im laufenden Spiel entfernen wir den
-        normalen Spieler.
+        Besitzer trennt sich:
+        kompletter Raum wird geschlossen.
     */
-    if (room.phase !== "lobby") {
-        removePlayerFromRoom(
+    if (
+        player.id ===
+        room.ownerId
+    ) {
+        closeRoom(
+            room,
+            "Der Besitzer hat die Verbindung getrennt."
+        );
+
+        return;
+    }
+
+    /*
+        Während eines laufenden Spiels wird
+        ein vollständig getrennter Spieler entfernt.
+    */
+    if (
+        room.phase !==
+            "lobby" &&
+        room.phase !==
+            "category"
+    ) {
+        removePlayer(
             player,
             room
         );
 
-        const activePlayers =
-            getConnectedActivePlayers(room);
+        checkRunningGame(
+            room
+        );
 
-        if (
-            activePlayers.length < 2
-        ) {
-            finishGame(room);
-            return;
-        }
-
-        broadcastState(room);
         return;
     }
 
-    broadcastState(room);
+    sendStateToRoom(room);
 }
 
 /* =========================================================
+   ONLINE-ZÄHLER AKTUALISIEREN
+========================================================= */
+
+/*
+    Zusätzliche Sicherheitsaktualisierung alle 3 Sekunden.
+    Dadurch bleibt der Zähler auch bei unerwarteten
+    Browser-/Netzwerk-Situationen möglichst aktuell.
+*/
+setInterval(
+    () => {
+        broadcastOnlineCount();
+    },
+    3000
+);
+
+/* =========================================================
    SERVER START
-   ========================================================= */
+========================================================= */
 
 server.listen(
     PORT,
@@ -1730,26 +3142,11 @@ server.listen(
         );
 
         console.log(
-            `Umgebungs-Port: ${
-                process.env.PORT || "nicht gesetzt"
+            `PORT: ${
+                process.env.PORT ||
+                "lokal 5500"
             }`
         );
     }
 );
 
-process.on(
-    "SIGINT",
-    () => {
-        console.log(
-            "Server wird beendet..."
-        );
-
-        for (const room of rooms.values()) {
-            clearRoomTimers(room);
-        }
-
-        server.close(() => {
-            process.exit(0);
-        });
-    }
-);
